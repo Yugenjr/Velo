@@ -41,11 +41,15 @@ We have successfully proven that `PyNvVideoCodec` can take encoded H.264 media a
 * While technically possible, building custom GStreamer C-plugins to bridge D3D11 textures into CUDA tensors for a simple feasibility check was rejected.
 
 ### webrtc-rs (Rust Native WebRTC)
-**ARCHITECTURALLY PLAUSIBLE, RUNTIME UNVERIFIED** (V0.2-B Experiment)
-* `webrtc-rs` is a high-performance port of Pion. It operates at a low level and exposes `TrackRemote.read_rtp()`, which yields raw network packets.
-* **Architecture:** We successfully authored a Rust implementation utilizing `rtp::packetizer::Depacketizer` to parse Single NAL, STAP-A, and FU-A RTP payloads into H.264 Annex-B encoded bytes.
-* **Limitation:** The runtime experiment failed strictly due to the host machine lacking the 4GB+ MSVC Visual Studio C++ Build Tools. Because compilation was blocked, we could not prove the integration with NVDEC at runtime.
-* **Status:** This remains the recommended primary candidate, pending a proper build environment.
+1. **Native WebRTC → Encoded H264**
+   - **Status:** **VERIFIED**
+   - **Implementation:** Rust (`webrtc-rs`)
+   - **Notes:** Capable of negotiating H.264 and reconstructing raw NAL units (SPS, PPS, IDR, Non-IDR) natively via RTP, without CPU video decoding. Build environment resolved natively on Windows with MSVC.
+
+2. **Direct Encoded H264 → NVDEC**
+   - **Status:** **VERIFIED**
+   - **Implementation:** `PyNvVideoCodec.CreateDecoder` (bypassing `SimpleDecoder` and Demuxer)
+   - **Notes:** Python NVDEC binding directly accepts raw encoded H.264 bitstream (`PacketData`) via memory pointers. Bypasses file containers and demuxers completely, decoding directly into DLPack-compatible GPU-resident surfaces (`cuda:0`).
 
 ---
 
