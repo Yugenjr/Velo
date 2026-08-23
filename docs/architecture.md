@@ -64,7 +64,19 @@ Based on investigations, the target architecture is a hybrid native application:
 
 ---
 
-## 5. Current Unknowns & Future Decisions
+## 5. Native Core → Python Boundary (PyO3)
+
+**Status: VERIFIED (V0.4 Full Memory Boundary Prove)**
+
+The abstraction boundary between Python and the native runtime is designed as follows:
+- **PyO3 Core**: A minimal native Python extension (`velo_native`) bridges the two environments.
+- **Async Runtime**: The Rust native core manages its own background `tokio` runtime to process WebRTC network traffic and H.264 depacketization. The Python GIL is released during these background network and decoding operations.
+- **Media Path**: WebRTC network bytes and encoded H.264 NAL units **never** surface to Python as `bytes`. They remain entirely in native memory and are fed directly into NVDEC using C pointers.
+- **GPU Frame Ownership**: The final decoded NVDEC frames cross the Python boundary exclusively as DLPack `PyCapsule` objects. The DLPack standard safely manages GPU memory ownership lifecycle between the native decoder and PyTorch. The native decoder reference is preserved in Python to safely extend the lifetime of the underlying CUDA context while PyTorch utilizes the tensor.
+
+---
+
+## 6. Current Unknowns & Future Decisions
 * **WebRTC Correctness:** Does the custom Rust depacketizer robustly handle extreme packet loss, PLI/FIR generation, and dynamic resolution changes (keyframe requests) typical in WebRTC?
 * **PyNvVideoCodec Stream Blocking:** Do operations on the resulting PyTorch tensors block safely on the NVDEC CUDA stream, or is manual CUDA synchronization required to prevent race conditions during continuous AI processing?
 * **Build Distribution:** If `webrtc-rs` is the final choice, how do we distribute it without requiring Python users to install MSVC and Rust? (Pre-compiled wheels will be required).

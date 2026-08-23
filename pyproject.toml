@@ -1,0 +1,19 @@
+[build-system]
+requires = ["maturin>=1.0,<2.0"]
+build-backend = "maturin"
+
+[project]
+name = "velo"
+version = "0.5.0"
+description = "Velo - WebRTC to GPU-native AI decode pipeline"
+readme = "README.md"
+requires-python = ">=3.8"
+dependencies = [
+    "torch",
+]
+
+[tool.maturin]
+features = ["pyo3/extension-module"]
+module-name = "velo._velo_native"
+python-source = "src"
+manifest-path = "native/Cargo.toml"
