@@ -1,0 +1,80 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Velo V0.1-B Sender</title>
+</head>
+<body>
+    <h1>WebRTC Camera Sender</h1>
+    <video id="localVideo" autoplay muted playsinline></video>
+    <br/>
+    <button id="startButton">Start Streaming</button>
+    <div id="status">Status: Disconnected</div>
+    <div id="codecInfo">Codec: Unknown</div>
+
+    <script>
+        const localVideo = document.getElementById('localVideo');
+        const startButton = document.getElementById('startButton');
+        const statusDiv = document.getElementById('status');
+        const codecInfoDiv = document.getElementById('codecInfo');
+        let pc;
+
+        async function start() {
+            try {
+                const stream = await navigator.mediaDevices.getUserMedia({ video: true, audio: false });
+                localVideo.srcObject = stream;
+                
+                pc = new RTCPeerConnection();
+                
+                stream.getTracks().forEach(track => {
+                    // Force H.264 if possible by adding transceiver preference
+                    const sender = pc.addTrack(track, stream);
+                    const capabilities = RTCRtpSender.getCapabilities('video');
+                    if (capabilities) {
+                        const h264Codecs = capabilities.codecs.filter(c => c.mimeType === 'video/H264');
+                        if (h264Codecs.length > 0 && sender.setCodecPreferences) {
+                            sender.setCodecPreferences(h264Codecs);
+                        }
+                    }
+                });
+
+                pc.oniceconnectionstatechange = () => {
+                    statusDiv.innerText = `Status: ${pc.iceConnectionState}`;
+                };
+
+                const offer = await pc.createOffer();
+                await pc.setLocalDescription(offer);
+
+                // In a real app, send offer to python via WebSocket/HTTP
+                console.log("Offer SDP:", offer.sdp);
+                
+                // Fetch answer from Python backend
+                const response = await fetch('http://localhost:8080/offer', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ sdp: offer.sdp, type: offer.type })
+                });
+
+                const answer = await response.json();
+                await pc.setRemoteDescription(answer);
+
+                // Display negotiated codec
+                const senders = pc.getSenders();
+                if (senders.length > 0) {
+                    const stats = await senders[0].getStats();
+                    stats.forEach(report => {
+                        if (report.type === 'codec') {
+                            codecInfoDiv.innerText = `Codec: ${report.mimeType}`;
+                        }
+                    });
+                }
+
+            } catch (e) {
+                console.error(e);
+                statusDiv.innerText = `Error: ${e.message}`;
+            }
+        }
+
+        startButton.onclick = start;
+    </script>
+</body>
+</html>
