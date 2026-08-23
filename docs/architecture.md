@@ -66,13 +66,17 @@ Based on investigations, the target architecture is a hybrid native application:
 
 ## 5. Native Core → Python Boundary (PyO3)
 
-**Status: VERIFIED (V0.4 Full Memory Boundary Prove)**
+**Status: VERIFIED & HARDENED (V0.5 Production Foundation)**
 
-The abstraction boundary between Python and the native runtime is designed as follows:
-- **PyO3 Core**: A minimal native Python extension (`velo_native`) bridges the two environments.
-- **Async Runtime**: The Rust native core manages its own background `tokio` runtime to process WebRTC network traffic and H.264 depacketization. The Python GIL is released during these background network and decoding operations.
-- **Media Path**: WebRTC network bytes and encoded H.264 NAL units **never** surface to Python as `bytes`. They remain entirely in native memory and are fed directly into NVDEC using C pointers.
-- **GPU Frame Ownership**: The final decoded NVDEC frames cross the Python boundary exclusively as DLPack `PyCapsule` objects. The DLPack standard safely manages GPU memory ownership lifecycle between the native decoder and PyTorch. The native decoder reference is preserved in Python to safely extend the lifetime of the underlying CUDA context while PyTorch utilizes the tensor.
+The abstraction boundary between Python and the native runtime is verified and hardened:
+- **PyO3 Core**: A native Python extension (`velo_native`) bridges the two environments.
+- **Async Runtime**: The Rust native core manages its own background `tokio` runtime running inside a dedicated OS worker thread. The Python GIL is released during `next_frame()` blocking waits.
+- **Media Path**: WebRTC network bytes and H.264 packets remain entirely in native Rust memory. Encoded NAL units are batched by RTP timestamp and fed into NVDEC using raw C pointers.
+- **GIL Optimization**: Rather than acquiring the GIL for every individual NAL packet, NALs are accumulated and decoded in batches per frame boundary, reducing GIL acquisition frequency to match frame rates (~30Hz).
+- **GPU Frame Ownership**: Decoded frames cross the Python boundary as DLPack `PyCapsule` objects. The `velo.Frame` object maintains a reference to the native NVDEC decoder context, guaranteeing the CUDA context outlives the PyTorch tensor.
+- **Graceful Shutdown**: Calling `stream.close()` triggers a thread-safe shutdown flag, closes the WebRTC peer connection, terminates the Tokio runtime, joins the worker thread (with Python GIL released), and drains any remaining queue frames under the GIL.
+- **Error Model**: Codec registration, WebRTC handshakes, and NVDEC failures are propagated as clean Python exceptions (`VeloConnectionError`, `DecodeError`, `StreamClosedError`) without panicking the Rust process.
+- **Frame Queue**: Bounded queue (`size=3`) drops stale frames (`Drop-Oldest`) under the GIL to prevent memory leaks and keep pipeline latency strictly real-time.
 
 ---
 

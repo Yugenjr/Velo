@@ -1,63 +1,130 @@
 import torch
-from typing import Optional
 from . import _velo_native
 from .exceptions import StreamClosedError
+
 
 class Frame:
     """
     A decoded video frame residing in GPU memory.
+
+    Holds internal references to the DLPack capsule and the native decoder
+    so the CUDA context outlives the tensor.
     """
+
+    __slots__ = ("_capsule", "_decoder_ref")
+
     def __init__(self, dlpack_capsule, decoder_ref):
         self._capsule = dlpack_capsule
         self._decoder_ref = decoder_ref
 
     def to_torch(self) -> torch.Tensor:
         """
-        Consumes the frame and returns a PyTorch CUDA tensor.
-        The resulting tensor is on cuda:0 and shares memory with the NVDEC surface.
+        Returns a PyTorch CUDA tensor backed by the GPU-resident frame.
+        Zero-copy — shares memory with the NVDEC output surface.
         """
         return torch.from_dlpack(self._capsule)
 
+    @property
+    def shape(self):
+        """Returns the shape of the decoded frame (height, width, channels)."""
+        return self._capsule.shape
+
+    @property
+    def width(self) -> int:
+        """Returns the width of the frame in pixels."""
+        return self._capsule.shape[1]
+
+    @property
+    def height(self) -> int:
+        """Returns the height of the frame in pixels."""
+        return self._capsule.shape[0]
+
+    @property
+    def timestamp(self) -> float:
+        """Returns the timestamp associated with this frame, if available."""
+        try:
+            return float(self._capsule.timestamp)
+        except Exception:
+            return 0.0
+
+
 class Stream:
     """
-    A WebRTC video stream.
+    A live WebRTC video stream producing GPU-decoded frames.
+
+    Lifecycle::
+
+        stream, sdp_answer = velo.connect(sdp_offer)
+        frame = stream.next()
+        tensor = frame.to_torch()
+        stream.close()
     """
+
     def __init__(self, native_stream):
-        self._native_stream = native_stream
-        self._closed = False
+        self._native = native_stream
 
     def next(self) -> Frame:
         """
-        Blocks until the next frame is decoded and available.
-        Returns a velo.Frame.
-        Raises velo.StreamClosedError if the peer disconnected or the stream was closed.
+        Block until the next decoded frame is available.
+
+        Releases the Python GIL internally so other threads can proceed.
+
+        Raises:
+            StreamClosedError: if the peer disconnected or close() was called.
         """
-        if self._closed:
-            raise StreamClosedError("Stream is already closed.")
-        
         try:
-            # Native blocking call, releases GIL internally
-            capsule, decoder = self._native_stream.next_frame()
+            capsule, decoder = self._native.next_frame()
             return Frame(capsule, decoder)
         except Exception as e:
-            if "StreamClosed" in str(e):
-                self._closed = True
-                raise StreamClosedError(str(e))
+            if "StreamClosed" in type(e).__name__ or "StreamClosed" in str(e):
+                raise StreamClosedError(str(e)) from None
             raise
 
     def close(self):
         """
-        Terminates the WebRTC connection and cleans up the native decoder.
+        Gracefully shut down the stream.
+
+        - Signals the native worker thread to stop.
+        - Joins the worker thread (releases GIL while waiting).
+        - Drains remaining frames from the queue.
+        - Releases WebRTC, NVDEC, and CUDA resources.
+
+        Idempotent — safe to call multiple times.
         """
-        if not self._closed:
-            self._native_stream.close()
-            self._closed = True
+        self._native.close()
+
+    @property
+    def dropped_frames(self) -> int:
+        """Number of frames dropped by the bounded queue (drop-oldest policy)."""
+        return self._native.dropped_frames
+
+    @property
+    def decode_errors(self) -> int:
+        """Number of NVDEC decode errors encountered."""
+        return self._native.decode_errors
+
+    def __del__(self):
+        try:
+            self._native.close()
+        except Exception:
+            pass
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *_):
+        self.close()
 
 
 def connect(sdp_offer: str):
     """
-    Connects to a WebRTC peer given an SDP offer.
-    Returns a tuple of (Stream, sdp_answer_string).
+    Connect to a WebRTC peer and begin receiving GPU-decoded video.
+
+    Args:
+        sdp_offer: The SDP offer string from the browser.
+
+    Returns:
+        A tuple of (Stream, sdp_answer_string).
     """
     native_stream, sdp_answer = _velo_native.connect(sdp_offer)
     return Stream(native_stream), sdp_answer

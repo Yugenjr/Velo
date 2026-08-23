@@ -1,0 +1,157 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Velo 0.1.0 Webcam Example</title>
+    <style>
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+            background-color: #0f172a;
+            color: #f8fafc;
+            max-width: 800px;
+            margin: 40px auto;
+            padding: 0 20px;
+            text-align: center;
+        }
+        h1 {
+            color: #38bdf8;
+        }
+        video {
+            width: 640px;
+            height: 480px;
+            background-color: #1e293b;
+            border-radius: 8px;
+            border: 2px solid #334155;
+            margin-bottom: 20px;
+        }
+        button {
+            background-color: #0284c7;
+            color: white;
+            border: none;
+            padding: 12px 24px;
+            font-size: 16px;
+            font-weight: 600;
+            border-radius: 6px;
+            cursor: pointer;
+            transition: background-color 0.2s;
+            margin: 5px;
+        }
+        button:hover {
+            background-color: #0369a1;
+        }
+        #shutdownButton {
+            background-color: #dc2626;
+        }
+        #shutdownButton:hover {
+            background-color: #b91c1c;
+        }
+        #status, #codecInfo {
+            margin-top: 15px;
+            font-size: 14px;
+            color: #94a3b8;
+        }
+    </style>
+</head>
+<body>
+    <h1>Velo Webcam to GPU-Native Tensor</h1>
+    <p>Captures camera, streams via WebRTC, decodes directly into GPU memory via NVDEC, and loads as a PyTorch CUDA tensor.</p>
+    
+    <video id="localVideo" autoplay muted playsinline></video>
+    <br/>
+    <button id="startButton">Start Streaming to Velo</button>
+    <button id="shutdownButton">Stop Stream</button>
+    
+    <div id="status">Status: Disconnected</div>
+    <div id="codecInfo">Negotiated Codec: None</div>
+
+    <script>
+        const localVideo = document.getElementById('localVideo');
+        const startButton = document.getElementById('startButton');
+        const shutdownButton = document.getElementById('shutdownButton');
+        const statusDiv = document.getElementById('status');
+        const codecInfoDiv = document.getElementById('codecInfo');
+        let pc;
+        let localStream;
+
+        async function start() {
+            try {
+                statusDiv.innerText = "Status: Initializing webcam...";
+                localStream = await navigator.mediaDevices.getUserMedia({ video: { width: 640, height: 480 }, audio: false });
+                localVideo.srcObject = localStream;
+                
+                pc = new RTCPeerConnection({
+                    iceServers: [{ urls: 'stun:stun.l.google.com:19302' }]
+                });
+                
+                localStream.getTracks().forEach(track => {
+                    const sender = pc.addTrack(track, localStream);
+                    
+                    // Force H264 profile preference
+                    const capabilities = RTCRtpSender.getCapabilities('video');
+                    if (capabilities) {
+                        const h264Codecs = capabilities.codecs.filter(c => c.mimeType === 'video/H264');
+                        if (h264Codecs.length > 0 && sender.setCodecPreferences) {
+                            sender.setCodecPreferences(h264Codecs);
+                        }
+                    }
+                });
+
+                pc.oniceconnectionstatechange = () => {
+                    statusDiv.innerText = `Status: ICE Connection ${pc.iceConnectionState}`;
+                };
+
+                const offer = await pc.createOffer();
+                await pc.setLocalDescription(offer);
+                
+                statusDiv.innerText = "Status: Sending SDP offer to Velo...";
+                const response = await fetch('/offer', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ sdp: pc.localDescription.sdp, type: pc.localDescription.type })
+                });
+
+                const answer = await response.json();
+                statusDiv.innerText = "Status: Connecting to native stream...";
+                await pc.setRemoteDescription(new RTCSessionDescription(answer));
+
+                // Find negotiated codec
+                const senders = pc.getSenders();
+                if (senders.length > 0) {
+                    const stats = await senders[0].getStats();
+                    stats.forEach(report => {
+                        if (report.type === 'codec') {
+                            codecInfoDiv.innerText = `Negotiated Codec: ${report.mimeType} (payload: ${report.payloadType})`;
+                        }
+                    });
+                }
+            } catch (e) {
+                console.error(e);
+                statusDiv.innerText = `Error: ${e.message}`;
+            }
+        }
+
+        async function stop() {
+            if (pc) {
+                pc.close();
+                pc = null;
+            }
+            if (localStream) {
+                localStream.getTracks().forEach(track => track.stop());
+                localStream = null;
+            }
+            localVideo.srcObject = null;
+            
+            statusDiv.innerText = "Status: Sending shutdown signal...";
+            try {
+                const res = await fetch('/shutdown', { method: 'POST' });
+                statusDiv.innerText = `Status: ${await res.text()}`;
+            } catch (e) {
+                statusDiv.innerText = `Status: Stopped locally (failed to contact server: ${e.message})`;
+            }
+            codecInfoDiv.innerText = "Negotiated Codec: None";
+        }
+
+        startButton.onclick = start;
+        shutdownButton.onclick = stop;
+    </script>
+</body>
+</html>

@@ -1,10 +1,11 @@
 from .core import connect, Stream, Frame
 from .exceptions import (
     VeloError,
-    ConnectionError,
+    VeloConnectionError,
     MediaError,
     HardwareError,
     StreamClosedError,
+    DecodeError,
 )
 
 __all__ = [
@@ -12,8 +13,9 @@ __all__ = [
     "Stream",
     "Frame",
     "VeloError",
-    "ConnectionError",
+    "VeloConnectionError",
     "MediaError",
     "HardwareError",
     "StreamClosedError",
+    "DecodeError",
 ]

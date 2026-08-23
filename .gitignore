@@ -89,3 +89,6 @@ temp/
 *.mkv
 *.avi
 *.mov
+*.h264
+*.webp
+
