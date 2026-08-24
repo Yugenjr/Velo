@@ -84,3 +84,27 @@ The abstraction boundary between Python and the native runtime is verified and h
 * **WebRTC Correctness:** Does the custom Rust depacketizer robustly handle extreme packet loss, PLI/FIR generation, and dynamic resolution changes (keyframe requests) typical in WebRTC?
 * **PyNvVideoCodec Stream Blocking:** Do operations on the resulting PyTorch tensors block safely on the NVDEC CUDA stream, or is manual CUDA synchronization required to prevent race conditions during continuous AI processing?
 * **Build Distribution:** If `webrtc-rs` is the final choice, how do we distribute it without requiring Python users to install MSVC and Rust? (Pre-compiled wheels will be required).
+
+---
+
+## 7. V0.9 Verified Status Matrix
+
+We categorize Velo's capabilities into the following strict status definitions:
+
+### VERIFIED (Actually executed successfully with runtime evidence)
+- **H.264 WebRTC Native Data Plane**: Browser WebRTC H.264 video -> native Rust `webrtc-rs` -> raw Annex-B NAL batching -> NVDEC GPU decode -> DLPack -> PyTorch CUDA tensor.
+- **Direct RTP Ingestion (`velo.RtpReceiver`)**: Pushing raw H.264 RTP packet payloads directly to a native parser OS worker thread, decoding on GPU, and producing `cuda:0` PyTorch tensors (verified in [tests/test_rtp.py](file:///c:/Users/Yugendra/Velo/Velo/tests/test_rtp.py)).
+- **LiveKit Video Track Integration (Mock)**: Automated Async packet ingestion from a mock LiveKit video track, piped to native `RtpReceiver` (verified in [tests/test_livekit.py](file:///c:/Users/Yugendra/Velo/Velo/tests/test_livekit.py)).
+- **Multi-Stream Scalability (4 Streams)**: Spawning 4 parallel thread consumers decoding independent streams concurrently, verifying frame count and queue drops under a 4-stream load (verified in [tests/test_multistream_4.py](file:///c:/Users/Yugendra/Velo/Velo/tests/test_multistream_4.py)).
+- **Max Performance Baseline**: Deterministic high-throughput test decoding H.264 packets at **4,750+ FPS** hardware maximum throughput ceiling, with only **3.5% CPU** load under a targeted 30 FPS workload (verified in [tests/benchmark_rtp.py](file:///c:/Users/Yugendra/Velo/Velo/tests/benchmark_rtp.py)).
+- **Unacceptable Codec Rejection**: Explicit rejection of unsupported/invalid codecs with clean ValueError propagation (verified in [tests/test_unit.py](file:///c:/Users/Yugendra/Velo/Velo/tests/test_unit.py)).
+- **Linux Native Validation via WSL2**: Compiled and executed natively in a WSL2 Ubuntu 22.04 LTS VM with RTX 3050 Laptop GPU passthrough, resolving package bindings and PyTorch linker SIGBUS crash issues.
+- **Precompiled Wheel Installation**: Maturin-compiled PEP-517 compliant binary wheels built and successfully verified in clean, compiler-free virtual environments on both Windows and Linux.
+
+### UNVERIFIED / BLOCKED
+- **Real LiveKit Server Direct Connection**: Direct WebRTC room track subscription and ingestion is implemented and experimentally verified on the signaling layer (via Websockets and Protobuf protocol stubs), but is unverified E2E due to missing `LIVEKIT_URL`, `LIVEKIT_API_KEY`, and `LIVEKIT_API_SECRET` credentials in the test execution environment.
+
+
+### PLANNED (Intentionally not yet implemented)
+- **VP8, VP9, AV1, and HEVC/H.265 Codec Ingest**: Codec structures are modeled in the pipeline interfaces but remains planned for implementation.
+

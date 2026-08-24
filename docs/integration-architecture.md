@@ -11,27 +11,12 @@ LiveKit handles WebRTC session orchestration, signaling, room management, and me
 
 ### Design Options for Velo Integration
 
-#### Option A: Explicit Track Receiver (Recommended Integration)
-The LiveKit Python agent listens for video tracks and forwards raw RTP packets directly to a Velo native stream buffer via a low-level push interface:
-```python
-# LiveKit Agent loop
-@room.on("track_subscribed")
-def on_track_subscribed(track, publication, participant):
-    if track.kind == "video":
-        # Create a Velo track receiver
-        v_stream = velo.create_rtp_receiver(codec="h264")
-        
-        # Pipe RTP packets directly
-        async for packet in track.read_rtp():
-            v_stream.push_rtp(packet.payload)
-```
-- **Pros**: Keeps signaling entirely inside LiveKit. Velo acts solely as a zero-copy media pipeline.
-- **Cons**: Exposes low-level RTP concepts to the Python layer, although it can be wrapped inside an adapter class (`velo.adapters.LiveKitAdapter`).
+#### Option A: Explicit Track Receiver (Mock/Synthetic Testing Only)
+Used to verify track ingestion and queue structures using mock track/packet objects. The official LiveKit Python SDK FFI layer abstracts and decodes video tracks natively inside its C++ engine, exposing only decoded CPU frames to Python. Thus, this option cannot be used for E2E zero-copy LiveKit integration.
 
-#### Option B: Direct Peer Connection Ingestion
-Velo behaves as a separate WebRTC peer and connects directly to the LiveKit SFU.
-- **Pros**: Pure abstraction.
-- **Cons**: Duplicate signaling, high overhead, requires embedding LiveKit client protocol inside Rust/Velo. (Architecturally incompatible with keeping Velo core focused).
+#### Option B: Direct Peer Connection Ingestion (Direct WebRTC Ingestion)
+Velo behaves as a separate WebRTC peer and connects directly to the LiveKit SFU. The signaling handshake is managed in Python using raw WebSocket and `livekit-protocol` Protobuf stubs, while the actual SDP answer generation, ICE connectivity, DTLS, and realtime H.264 media data plane are managed natively in Rust via `webrtc-rs` and NVDEC (using the standard `velo.connect` FFI wrapper). This completely bypasses CPU decoding and satisfies the non-negotiable GPU-native pipeline constraints.
+
 
 ---
 

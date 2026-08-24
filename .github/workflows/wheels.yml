@@ -1,0 +1,52 @@
+name: Build Wheels
+
+on:
+  push:
+    branches: [ main ]
+    tags:
+      - 'v*'
+  pull_request:
+    branches: [ main ]
+
+jobs:
+  build_wheels:
+    name: Build wheels on ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Install cibuildwheel and maturin
+        run: |
+          python -m pip install --upgrade pip
+          pip install cibuildwheel maturin
+
+      # cibuildwheel automatically runs inside docker containers for Linux
+      # to ensure manylinux compatibility.
+      - name: Build wheels
+        run: python -m cibuildwheel --output-dir wheelhouse
+        env:
+          CIBW_BUILD: "cp38-* cp39-* cp310-* cp311-* cp312-* cp313-*"
+          CIBW_SKIP: "*_universal2:write_to_file"
+          # Maturin pep517 build command
+          CIBW_BEFORE_BUILD: "pip install maturin"
+          CIBW_BUILD_FRONTEND: "build"
+          # Linux specific: install compiler dependencies inside manylinux container
+          CIBW_BEFORE_BUILD_LINUX: "yum install -y openssl-devel pkgconfig || apk add openssl-dev pkgconfig"
+
+      - name: Upload wheel artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: cibw-wheels-${{ matrix.os }}-${{ strategy.job-index }}
+          path: ./wheelhouse/*.whl

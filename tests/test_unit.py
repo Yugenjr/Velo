@@ -44,8 +44,29 @@ def test_native_module():
     assert hasattr(_velo_native, "DecodeError")
     print("[PASS] test_native_module")
 
+def test_unsupported_codec_rejection():
+    """Verify that requesting unsupported codecs raises ValueError."""
+    import velo
+    # 1. Test planned but unsupported codecs
+    for codec in ["vp8", "vp9", "av1", "hevc", "h265"]:
+        try:
+            velo.RtpReceiver(codec=codec)
+            assert False, f"Codec {codec} should have been rejected!"
+        except ValueError as e:
+            assert "PLANNED but not yet supported" in str(e)
+            print(f"[PASS] Correctly rejected planned codec: {codec}")
+
+    # 2. Test completely invalid codecs
+    try:
+        velo.RtpReceiver(codec="invalid_codec")
+        assert False, "Invalid codec should have been rejected!"
+    except ValueError as e:
+        assert "Unsupported or invalid codec" in str(e)
+        print("[PASS] Correctly rejected completely invalid codec")
+
 if __name__ == "__main__":
     test_import()
     test_exception_hierarchy()
     test_native_module()
+    test_unsupported_codec_rejection()
     print("\n--- All unit tests passed ---")

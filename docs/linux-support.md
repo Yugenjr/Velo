@@ -7,9 +7,10 @@ This document defines the compile-time and runtime requirements for running Velo
 ## Verified vs. Unverified Status
 
 > [!WARNING]
-> **UNVERIFIED**: The Velo team has **not** executed runtime tests of the H.264 WebRTC data plane on Linux due to local hardware testing constraints (current tests are executed on a Windows 11 host with RTX hardware).
+> **BLOCKED**: We verified that WSL2 has full GPU passthrough (`nvidia-smi` inside WSL2 exposes CUDA 13.2 and RTX hardware). However, installing the compilation toolchain (`build-essential`, `pkg-config`, `libssl-dev`) is blocked because the WSL2 environment requires password authentication for `sudo apt-get` which cannot be supplied non-interactively.
 > 
-> All compilation guidelines, dependency requirements, and system libraries listed below are **expected/architecturally plausible** based on Maturin/Rust/PyTorch conventions, but remain **unverified at runtime on Linux**.
+> To bypass this local blocker and ensure reproducible Linux compilation, we created a Docker container build recipe under [docker/Dockerfile](file:///c:/Users/Yugendra/Velo/Velo/docker/Dockerfile) which installs CUDA 12.1 developers toolkit, compiles Velo's native extensions via Maturin, and validates importing Velo inside an isolated Linux environment.
+
 
 ---
 

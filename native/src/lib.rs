@@ -5,6 +5,7 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use tokio::runtime::Runtime;
 use crossbeam_channel::{bounded, Receiver};
+use bytes::Bytes;
 use webrtc::api::media_engine::{MediaEngine, MIME_TYPE_H264};
 use webrtc::api::APIBuilder;
 use webrtc::api::interceptor_registry::register_default_interceptors;
@@ -38,6 +39,8 @@ impl NvDecoder {
         kwargs.set_item("usedevicememory", true)?;
         let output_color_type = nvc.getattr("OutputColorType")?;
         kwargs.set_item("outputColorType", output_color_type.getattr("RGB")?)?;
+        kwargs.set_item("maxwidth", 1920)?;
+        kwargs.set_item("maxheight", 1080)?;
 
         let decoder_obj = nvc.getattr("CreateDecoder")?.call((), Some(&kwargs))?.into_py(py);
         Ok(Self { decoder_obj })
@@ -62,9 +65,8 @@ impl NvDecoder {
     }
 }
 
-// ---------------------------------------------------------------------------
-// NativeStream — the PyO3-exposed stream object
-// ---------------------------------------------------------------------------
+type OfferMessage = (String, crossbeam_channel::Sender<Result<String, String>>);
+
 #[pyclass]
 struct NativeStream {
     /// Receives decoded GPU frames from the worker thread.
@@ -81,6 +83,8 @@ struct NativeStream {
     dropped_count: Arc<AtomicU64>,
     /// Number of NVDEC decode errors encountered.
     error_count: Arc<AtomicU64>,
+    /// Channel to send renegotiation offers to the worker thread.
+    offer_tx: crossbeam_channel::Sender<OfferMessage>,
 }
 
 #[pymethods]
@@ -150,6 +154,27 @@ impl NativeStream {
         }
     }
 
+    fn set_offer(&self, py: Python, sdp_offer: String) -> PyResult<String> {
+        if self.closed.load(Ordering::SeqCst) {
+            return Err(StreamClosedError::new_err("Stream is closed"));
+        }
+        let (reply_tx, reply_rx) = bounded::<Result<String, String>>(1);
+        let send_res = py.allow_threads(|| {
+            self.offer_tx.send((sdp_offer, reply_tx))
+        });
+        if send_res.is_err() {
+            return Err(VeloConnectionError::new_err("Worker thread exited"));
+        }
+        let reply = py.allow_threads(|| {
+            reply_rx.recv()
+        }).map_err(|_| VeloConnectionError::new_err("Failed to receive SDP answer from worker"))?;
+        
+        match reply {
+            Ok(sdp_answer) => Ok(sdp_answer),
+            Err(e) => Err(VeloConnectionError::new_err(e)),
+        }
+    }
+
     /// Number of frames dropped by the bounded queue.
     #[getter]
     fn dropped_frames(&self) -> u64 {
@@ -162,6 +187,7 @@ impl NativeStream {
         self.error_count.load(Ordering::Relaxed)
     }
 }
+
 
 impl Drop for NativeStream {
     fn drop(&mut self) {
@@ -182,6 +208,7 @@ async fn run_connection_setup(
     frame_tx: crossbeam_channel::Sender<PyObject>,
     drain_rx: crossbeam_channel::Receiver<PyObject>,
     sdp_tx: crossbeam_channel::Sender<Result<String, String>>,
+    offer_rx: crossbeam_channel::Receiver<OfferMessage>,
 ) {
     // ---- WebRTC setup ----
     let mut m = MediaEngine::default();
@@ -275,10 +302,27 @@ async fn run_connection_setup(
                 let mut current_ts: u32 = 0;
                 let mut first_packet = true;
 
-                while let Ok((rtp_pkt, _)) = track.read_rtp().await {
+                loop {
                     if shutdown_t.load(Ordering::Relaxed) {
                         break;
                     }
+
+                    let read_res = tokio::time::timeout(
+                        std::time::Duration::from_secs(5),
+                        track.read_rtp()
+                    ).await;
+
+                    let rtp_pkt = match read_res {
+                        Ok(Ok((pkt, _))) => pkt,
+                        Ok(Err(e)) => {
+                            eprintln!("[velo] WebRTC track read error: {:?}", e);
+                            break;
+                        }
+                        Err(_) => {
+                            eprintln!("[velo] WebRTC track read timeout: no packets received for 5 seconds");
+                            break;
+                        }
+                    };
 
                     let ts = rtp_pkt.header.timestamp;
                     let payload = rtp_pkt.payload;
@@ -339,6 +383,7 @@ async fn run_connection_setup(
                         }
                     });
                 }
+                shutdown_t.store(true, Ordering::SeqCst);
             });
         })
     }));
@@ -387,6 +432,25 @@ async fn run_connection_setup(
 
     // Keep the Tokio runtime alive on this thread and await shutdown
     while !shutdown.load(Ordering::Relaxed) {
+        if let Ok((new_offer, reply_tx)) = offer_rx.try_recv() {
+            let pc_clone = pc.clone();
+            let res: Result<String, webrtc::Error> = async move {
+                let desc = webrtc::peer_connection::sdp::session_description::RTCSessionDescription::offer(new_offer)?;
+                pc_clone.set_remote_description(desc).await?;
+                let answer = pc_clone.create_answer(None).await?;
+                let mut gather_complete = pc_clone.gathering_complete_promise().await;
+                pc_clone.set_local_description(answer).await?;
+                let _ = gather_complete.recv().await;
+                let local_desc = pc_clone.local_description().await
+                    .ok_or_else(|| webrtc::Error::ErrConnectionClosed)?;
+                Ok(local_desc.sdp)
+            }.await;
+            
+            match res {
+                Ok(sdp_answer) => { let _ = reply_tx.send(Ok(sdp_answer)); }
+                Err(e) => { let _ = reply_tx.send(Err(format!("Renegotiation failed: {:?}", e))); }
+            }
+        }
         tokio::time::sleep(std::time::Duration::from_millis(50)).await;
     }
 
@@ -395,6 +459,202 @@ async fn run_connection_setup(
 
     // Small delay to ensure WebRTC task terminates cleanly
     tokio::time::sleep(std::time::Duration::from_millis(200)).await;
+}
+
+// ---------------------------------------------------------------------------
+// RtpReceiver — external RTP packet ingestion class
+// ---------------------------------------------------------------------------
+#[pyclass]
+struct RtpReceiver {
+    rtp_tx: std::sync::Mutex<Option<crossbeam_channel::Sender<(Vec<u8>, u32)>>>,
+    frame_rx: Receiver<PyObject>,
+    decoder_obj: PyObject,
+    shutdown: Arc<AtomicBool>,
+    worker_handle: std::sync::Mutex<Option<JoinHandle<()>>>,
+    closed: AtomicBool,
+    dropped_count: Arc<AtomicU64>,
+    error_count: Arc<AtomicU64>,
+}
+
+#[pymethods]
+impl RtpReceiver {
+    #[new]
+    fn new(py: Python, codec: String) -> PyResult<Self> {
+        let codec_lower = codec.to_lowercase();
+        if codec_lower != "h264" {
+            if codec_lower == "vp8" || codec_lower == "vp9" || codec_lower == "av1" || codec_lower == "hevc" || codec_lower == "h265" {
+                return Err(pyo3::exceptions::PyValueError::new_err(format!(
+                    "Codec '{}' is PLANNED but not yet supported in this Velo native build",
+                    codec
+                )));
+            } else {
+                return Err(pyo3::exceptions::PyValueError::new_err(format!(
+                    "Unsupported or invalid codec: '{}'",
+                    codec
+                )));
+            }
+        }
+
+        let nvdec = Arc::new(NvDecoder::new(py)?);
+        let decoder_obj = nvdec.decoder_obj.clone_ref(py);
+
+        let (rtp_tx, rtp_rx) = bounded::<(Vec<u8>, u32)>(200);
+        let (frame_tx, frame_rx) = bounded::<PyObject>(3);
+        let drain_rx = frame_rx.clone();
+
+        let shutdown = Arc::new(AtomicBool::new(false));
+        let shutdown_worker = shutdown.clone();
+
+        let dropped_count = Arc::new(AtomicU64::new(0));
+        let error_count = Arc::new(AtomicU64::new(0));
+        let dropped_worker = dropped_count.clone();
+        let errors_worker = error_count.clone();
+
+        let worker_handle = thread::spawn(move || {
+            let mut depacketizer = H264Packet::default();
+            let mut nal_buffer: Vec<u8> = Vec::with_capacity(65536);
+            let mut current_ts: u32 = 0;
+            let mut first_packet = true;
+
+            while let Ok((payload, ts)) = rtp_rx.recv() {
+                if shutdown_worker.load(Ordering::Relaxed) {
+                    break;
+                }
+
+                let payload_bytes = Bytes::from(payload);
+                let nal_bytes = match rtp::packetizer::Depacketizer::depacketize(
+                    &mut depacketizer,
+                    &payload_bytes,
+                ) {
+                    Ok(b) if !b.is_empty() => b,
+                    _ => continue,
+                };
+
+                if !first_packet && ts != current_ts && !nal_buffer.is_empty() {
+                    Python::with_gil(|py| {
+                        match nvdec.decode(py, &nal_buffer) {
+                            Ok(frames) => {
+                                for frame in frames {
+                                    while frame_tx.is_full() {
+                                        if let Ok(_old) = drain_rx.try_recv() {
+                                            dropped_worker.fetch_add(1, Ordering::Relaxed);
+                                        }
+                                    }
+                                    let _ = frame_tx.send(frame);
+                                }
+                            }
+                            Err(e) => {
+                                errors_worker.fetch_add(1, Ordering::Relaxed);
+                                eprintln!("[velo] NVDEC decode error: {}", e);
+                            }
+                        }
+                    });
+                    nal_buffer.clear();
+                }
+
+                first_packet = false;
+                current_ts = ts;
+                nal_buffer.extend_from_slice(&[0x00, 0x00, 0x00, 0x01]);
+                nal_buffer.extend_from_slice(&nal_bytes);
+            }
+
+            // Flush final NALs
+            if !nal_buffer.is_empty() {
+                Python::with_gil(|py| {
+                    if let Ok(frames) = nvdec.decode(py, &nal_buffer) {
+                        for frame in frames {
+                            while frame_tx.is_full() {
+                                if let Ok(_old) = drain_rx.try_recv() {
+                                    dropped_worker.fetch_add(1, Ordering::Relaxed);
+                                }
+                            }
+                            let _ = frame_tx.send(frame);
+                        }
+                    }
+                });
+            }
+        });
+
+        Ok(Self {
+            rtp_tx: std::sync::Mutex::new(Some(rtp_tx)),
+            frame_rx,
+            decoder_obj,
+            shutdown,
+            worker_handle: std::sync::Mutex::new(Some(worker_handle)),
+            closed: AtomicBool::new(false),
+            dropped_count,
+            error_count,
+        })
+    }
+
+    fn push_rtp(&self, py: Python, payload: &[u8], timestamp: u32) -> PyResult<()> {
+        if self.closed.load(Ordering::SeqCst) {
+            return Err(StreamClosedError::new_err("RtpReceiver is closed"));
+        }
+        
+        let tx_opt = self.rtp_tx.lock().unwrap().clone();
+        if let Some(tx) = tx_opt {
+            let res = py.allow_threads(|| {
+                tx.send((payload.to_vec(), timestamp))
+            });
+            if res.is_err() {
+                return Err(StreamClosedError::new_err("RtpReceiver worker thread hung up"));
+            }
+        } else {
+            return Err(StreamClosedError::new_err("RtpReceiver is closed"));
+        }
+        Ok(())
+    }
+
+    fn next_frame(&self, py: Python) -> PyResult<PyObject> {
+        if self.closed.load(Ordering::SeqCst) {
+            return Err(StreamClosedError::new_err("RtpReceiver is closed"));
+        }
+        let frame_opt = py.allow_threads(|| self.frame_rx.recv().ok());
+        match frame_opt {
+            Some(frame) => {
+                let decoder_ref = self.decoder_obj.clone_ref(py);
+                let result = PyTuple::new_bound(
+                    py,
+                    &[
+                        frame.into_bound(py).into_any(),
+                        decoder_ref.into_bound(py).into_any(),
+                    ],
+                );
+                Ok(result.into_py(py))
+            }
+            None => Err(StreamClosedError::new_err("RtpReceiver closed")),
+        }
+    }
+
+    fn close(&self, py: Python) {
+        if self.closed.swap(true, Ordering::SeqCst) {
+            return;
+        }
+        self.shutdown.store(true, Ordering::SeqCst);
+        
+        // Take and drop the sender immediately to unblock the worker thread's recv() loop
+        let _tx = self.rtp_tx.lock().unwrap().take();
+        std::mem::drop(_tx);
+        
+        let handle = self.worker_handle.lock().unwrap().take();
+        if let Some(handle) = handle {
+            py.allow_threads(|| {
+                let _ = handle.join();
+            });
+        }
+        while let Ok(_frame) = self.frame_rx.try_recv() {}
+    }
+
+    #[getter]
+    fn dropped_frames(&self) -> u64 {
+        self.dropped_count.load(Ordering::Relaxed)
+    }
+
+    #[getter]
+    fn decode_errors(&self) -> u64 {
+        self.error_count.load(Ordering::Relaxed)
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -420,6 +680,9 @@ fn connect(py: Python, sdp_offer: String) -> PyResult<PyObject> {
     // ---- 4. SDP answer channel ----
     let (sdp_tx, sdp_rx) = bounded::<Result<String, String>>(1);
 
+    // ---- 4.5 Renegotiation channel ----
+    let (offer_tx, offer_rx) = bounded::<OfferMessage>(10);
+
     let nvdec_for_worker = nvdec.clone();
     let dropped_worker = dropped_count.clone();
     let errors_worker = error_count.clone();
@@ -437,6 +700,7 @@ fn connect(py: Python, sdp_offer: String) -> PyResult<PyObject> {
                 frame_tx,
                 drain_rx,
                 sdp_tx,
+                offer_rx,
             ).await;
         });
     });
@@ -466,6 +730,7 @@ fn connect(py: Python, sdp_offer: String) -> PyResult<PyObject> {
         closed: AtomicBool::new(false),
         dropped_count,
         error_count,
+        offer_tx,
     };
 
     let result = PyTuple::new_bound(
@@ -484,6 +749,7 @@ fn connect(py: Python, sdp_offer: String) -> PyResult<PyObject> {
 #[pymodule]
 fn _velo_native(py: Python, m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(connect, m)?)?;
+    m.add_class::<RtpReceiver>()?;
     m.add("VeloError", py.get_type_bound::<VeloError>())?;
     m.add("VeloConnectionError", py.get_type_bound::<VeloConnectionError>())?;
     m.add("StreamClosedError", py.get_type_bound::<StreamClosedError>())?;

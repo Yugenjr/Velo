@@ -21,6 +21,9 @@ This document outlines the evaluation and priorities for expanding Velo's suppor
 ### Phase 1: H.264 (Current - Verified)
 The H.264 pipeline is fully implemented, verified, and performance-tested. It relies on standard Annex-B depacketization and `webrtc::rtp_transceiver` payload negotiations.
 
+V0.9 added explicit native-level parameter validation inside the Rust extension. Requesting planned but unsupported codecs (VP8/VP9/AV1/HEVC) raises an explicit `ValueError` indicating that it is planned but unsupported, while invalid names are rejected, ensuring no silent fallbacks to CPU decoding.
+
+
 ### Phase 2: VP9 (Planned)
 - **Rationale**: VP9 is the default choice for modern high-definition browser-to-browser WebRTC streams (offering ~30% better compression than H.264).
 - **Complexity**: Low to Moderate. Requires updating `MediaEngine` registrations in `_velo_native` and integrating VP9 RTP depacketization in Rust (`rtp::codecs::vp9`). The PyNvVideoCodec layer already supports VP9 decoding.
