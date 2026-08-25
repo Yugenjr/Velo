@@ -125,17 +125,19 @@ class Stream:
         self.close()
 
 
-def connect(sdp_offer: str):
+def connect(sdp_offer: str, max_width: int = None, max_height: int = None):
     """
     Connect to a WebRTC peer and begin receiving GPU-decoded video.
 
     Args:
         sdp_offer: The SDP offer string from the browser.
+        max_width: Maximum expected stream width (default 1920).
+        max_height: Maximum expected stream height (default 1080).
 
     Returns:
         A tuple of (Stream, sdp_answer_string).
     """
-    native_stream, sdp_answer = _velo_native.connect(sdp_offer)
+    native_stream, sdp_answer = _velo_native.connect(sdp_offer, max_width, max_height)
     return Stream(native_stream), sdp_answer
 
 
@@ -144,8 +146,8 @@ class RtpReceiver:
     Ingests raw H.264 RTP packet payloads and decodes them directly to GPU memory.
     """
 
-    def __init__(self, codec: str = "h264"):
-        self._native = _velo_native.RtpReceiver(codec)
+    def __init__(self, codec: str = "h264", max_width: int = None, max_height: int = None):
+        self._native = _velo_native.RtpReceiver(codec, max_width, max_height)
 
     def push_rtp(self, payload: bytes, timestamp: int):
         """

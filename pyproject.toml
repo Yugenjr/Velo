@@ -9,7 +9,6 @@ description = "Velo - WebRTC to GPU-native AI decode pipeline"
 readme = "README.md"
 requires-python = ">=3.8"
 dependencies = [
-    "torch",
     "websockets",
     "livekit-protocol",
     "livekit-api",

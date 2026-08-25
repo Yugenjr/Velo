@@ -33,14 +33,17 @@ struct NvDecoder {
 }
 
 impl NvDecoder {
-    fn new(py: Python) -> PyResult<Self> {
+    fn new(py: Python, max_width: Option<u32>, max_height: Option<u32>) -> PyResult<Self> {
         let nvc = PyModule::import_bound(py, "PyNvVideoCodec")?;
         let kwargs = PyDict::new_bound(py);
         kwargs.set_item("usedevicememory", true)?;
         let output_color_type = nvc.getattr("OutputColorType")?;
         kwargs.set_item("outputColorType", output_color_type.getattr("RGB")?)?;
-        kwargs.set_item("maxwidth", 1920)?;
-        kwargs.set_item("maxheight", 1080)?;
+
+        let width = max_width.unwrap_or(1920);
+        let height = max_height.unwrap_or(1080);
+        kwargs.set_item("maxwidth", width)?;
+        kwargs.set_item("maxheight", height)?;
 
         let decoder_obj = nvc.getattr("CreateDecoder")?.call((), Some(&kwargs))?.into_py(py);
         Ok(Self { decoder_obj })
@@ -168,7 +171,7 @@ impl NativeStream {
         let reply = py.allow_threads(|| {
             reply_rx.recv()
         }).map_err(|_| VeloConnectionError::new_err("Failed to receive SDP answer from worker"))?;
-        
+
         match reply {
             Ok(sdp_answer) => Ok(sdp_answer),
             Err(e) => Err(VeloConnectionError::new_err(e)),
@@ -445,7 +448,7 @@ async fn run_connection_setup(
                     .ok_or_else(|| webrtc::Error::ErrConnectionClosed)?;
                 Ok(local_desc.sdp)
             }.await;
-            
+
             match res {
                 Ok(sdp_answer) => { let _ = reply_tx.send(Ok(sdp_answer)); }
                 Err(e) => { let _ = reply_tx.send(Err(format!("Renegotiation failed: {:?}", e))); }
@@ -479,7 +482,8 @@ struct RtpReceiver {
 #[pymethods]
 impl RtpReceiver {
     #[new]
-    fn new(py: Python, codec: String) -> PyResult<Self> {
+    #[pyo3(signature = (codec, max_width=None, max_height=None))]
+    fn new(py: Python, codec: String, max_width: Option<u32>, max_height: Option<u32>) -> PyResult<Self> {
         let codec_lower = codec.to_lowercase();
         if codec_lower != "h264" {
             if codec_lower == "vp8" || codec_lower == "vp9" || codec_lower == "av1" || codec_lower == "hevc" || codec_lower == "h265" {
@@ -495,7 +499,7 @@ impl RtpReceiver {
             }
         }
 
-        let nvdec = Arc::new(NvDecoder::new(py)?);
+        let nvdec = Arc::new(NvDecoder::new(py, max_width, max_height)?);
         let decoder_obj = nvdec.decoder_obj.clone_ref(py);
 
         let (rtp_tx, rtp_rx) = bounded::<(Vec<u8>, u32)>(200);
@@ -591,7 +595,7 @@ impl RtpReceiver {
         if self.closed.load(Ordering::SeqCst) {
             return Err(StreamClosedError::new_err("RtpReceiver is closed"));
         }
-        
+
         let tx_opt = self.rtp_tx.lock().unwrap().clone();
         if let Some(tx) = tx_opt {
             let res = py.allow_threads(|| {
@@ -632,11 +636,11 @@ impl RtpReceiver {
             return;
         }
         self.shutdown.store(true, Ordering::SeqCst);
-        
+
         // Take and drop the sender immediately to unblock the worker thread's recv() loop
         let _tx = self.rtp_tx.lock().unwrap().take();
         std::mem::drop(_tx);
-        
+
         let handle = self.worker_handle.lock().unwrap().take();
         if let Some(handle) = handle {
             py.allow_threads(|| {
@@ -661,9 +665,10 @@ impl RtpReceiver {
 // connect() — the main entry point
 // ---------------------------------------------------------------------------
 #[pyfunction]
-fn connect(py: Python, sdp_offer: String) -> PyResult<PyObject> {
+#[pyo3(signature = (sdp_offer, max_width=None, max_height=None))]
+fn connect(py: Python, sdp_offer: String, max_width: Option<u32>, max_height: Option<u32>) -> PyResult<PyObject> {
     // ---- 1. Initialize NVDEC decoder (allocates CUDA context) ----
-    let nvdec = Arc::new(NvDecoder::new(py)?);
+    let nvdec = Arc::new(NvDecoder::new(py, max_width, max_height)?);
     let decoder_obj_for_stream = nvdec.decoder_obj.clone_ref(py);
 
     // ---- 2. Bounded frame queue ----

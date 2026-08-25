@@ -6,14 +6,11 @@ Velo is a developer-facing bridge designed to stream realtime WebRTC video direc
 
 ## Why Velo?
 
-In traditional Python media pipelines (e.g. using `aiortc` and `PyAV` or `OpenCV`), processing realtime video for AI models follows this path:
-
+In traditional Python media pipelines, processing realtime video for AI models follows this path:
 1. **Network**: Receive RTP packets.
-2. **CPU Decode**: Assemble and decode H.264 frames on the CPU into numpy arrays.
+2. **CPU Decode**: Assemble and decode H.264 frames on the CPU.
 3. **GIL Bottleneck**: Frame decoding blocks the Python interpreter.
 4. **Memory Copy**: Upload decoded pixel buffers from CPU RAM to GPU VRAM.
-
-This pipeline creates severe CPU bottlenecks and latency, limiting throughput for multi-stream vision models.
 
 **Velo solves this by keeping the entire media data plane GPU-native:**
 
@@ -29,72 +26,70 @@ DLPack Capsule (zero-copy memory sharing)
 PyTorch CUDA Tensor (cuda:0)
 ```
 
-By bypassing CPU decoding and CPU-to-GPU RAM copies, Velo achieves high FPS and minimal latency, leaving the CPU completely free for other operations.
+## Supported Environments
+- **Platform**: Windows x64
+- **Python**: CPython 3.13 (win_amd64)
+- **Hardware**: NVIDIA GPU with NVENC/NVDEC capabilities
+- **Software**: NVIDIA Display Driver supporting CUDA 12+, CUDA-enabled PyTorch
 
----
+## Installation
 
-## Core Principles
-
-- **Zero CPU Video Decoding**: H.264 NAL units are extracted natively and sent directly to NVDEC.
-- **Zero-Copy Memory Boundary**: GPU frames are wrapped into DLPack `PyCapsule` objects, allowing PyTorch to consume the memory instantly.
-- **GIL-Free Concurrency**: Concurrency is managed in native Rust via a background Tokio runtime. The Python GIL is released during blocking waits.
-- **Developer Ergonomics**: A clean, 5-line Python interface wraps all low-level networking and hardware code.
-
----
-
-## What Velo Is Not
-
-Velo is **not** a replacement for:
-- **GStreamer / FFmpeg**: It does not support arbitrary demuxing, software filtering, or complex audio/video transcoding.
-- **NVIDIA DeepStream**: It is not a complete analytics SDK. It is a simple python media-to-GPU primitive.
-- **WebRTC SFUs / Media Servers**: Velo is a receiver/endpoint node, not a multi-party router.
-
----
-
-## Quick Start
-
-### Installation
-
-Ensure you have an NVIDIA GPU, the CUDA Toolkit, PyTorch (with CUDA support), and `PyNvVideoCodec` installed. Then, install Velo:
+You must install Velo's runtime prerequisites manually to avoid overwriting CUDA-enabled PyTorch environments.
+Please refer to the detailed [Installation Guide](docs/installation.md) for step-by-step instructions.
 
 ```bash
-pip install .
+pip install velo
 ```
 
-### Usage Example
+## Minimal Usage
+
+Velo provides a clean Python interface that wraps all low-level networking and hardware code.
 
 ```python
 import velo
 import torch
 
-# Initialize CUDA context
 torch.cuda.init()
 
-# Establish WebRTC stream from an SDP offer
+# Connect to a WebRTC stream (e.g. from an SDP offer)
 stream, sdp_answer = velo.connect(sdp_offer)
 
-# Consume GPU-resident frames using context manager
 with stream:
     while True:
         try:
             # Blocks and releases Python GIL internally
             frame = stream.next()
             
-            # Map directly to PyTorch CUDA tensor (zero-copy, cuda:0)
+            # Map directly to PyTorch CUDA tensor (zero-copy, cuda:0, uint8, HxWxC)
             tensor = frame.to_torch()
             
-            # Access metadata
-            print(f"Shape: {frame.shape} ({frame.width}x{frame.height})")
+            print(f"Shape: {tensor.shape}, Device: {tensor.device}")
             
         except velo.StreamClosedError:
             break
 ```
 
-For a complete working webcam example with a browser frontend, check out [examples/basic_webcam.py](examples/basic_webcam.py).
+## LiveKit Integration
+
+Velo natively supports subscribing to [LiveKit](https://livekit.io/) tracks. You must provide a valid WebSocket URL and Access Token.
+
+```python
+stream = velo.connect_livekit("ws://localhost:7880", livekit_token)
+with stream:
+    # Consume frames natively...
+    frame = stream.next()
+```
 
 ## Documentation
-- [Getting Started & Installation Guide](docs/getting-started.md)
-- [Technical Architecture](docs/architecture.md)
+- [Installation Guide](docs/installation.md)
+- [Public API Reference](docs/api.md)
+
+## Known Limitations
+The following features are **not yet supported or verified** in V1.0.0:
+- ABI3 Forward Compatibility (currently bound directly to CPython 3.13 on Windows).
+- LiveKit Cloud deployment verification (only local LiveKit server is verified).
+- CPU fallback / non-NVDEC software decoding.
+- 4K resolution stream verification.
 
 ## License
 Velo is licensed under the Apache License 2.0. See the [LICENSE](LICENSE) file for details.
