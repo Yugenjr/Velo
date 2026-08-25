@@ -7,10 +7,13 @@ import psutil
 import torch
 import velo
 
-# Configurations
-LIVEKIT_URL = "ws://localhost:7880"
-API_KEY = "mykey"
-API_SECRET = "mysecretkeywithmorethan32characters"
+LIVEKIT_URL = os.environ.get("LIVEKIT_URL", "ws://localhost:7880")
+API_KEY = os.environ.get("LIVEKIT_API_KEY")
+API_SECRET = os.environ.get("LIVEKIT_API_SECRET")
+
+if not API_KEY or not API_SECRET:
+    print("LIVEKIT_API_KEY and LIVEKIT_API_SECRET must be set to run test_hardening.py")
+    sys.exit(1)
 
 def get_gpu_metrics():
     try:

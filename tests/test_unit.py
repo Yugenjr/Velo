@@ -64,9 +64,24 @@ def test_unsupported_codec_rejection():
         assert "Unsupported or invalid codec" in str(e)
         print("[PASS] Correctly rejected completely invalid codec")
 
+def test_custom_dimensions():
+    """Verify that RtpReceiver accepts custom dimensions configuration."""
+    import velo
+    # 1. Test default construct
+    rx_default = velo.RtpReceiver(codec="h264")
+    assert rx_default is not None
+    rx_default.close()
+
+    # 2. Test custom 4K resolution bounds
+    rx_4k = velo.RtpReceiver(codec="h264", max_width=3840, max_height=2160)
+    assert rx_4k is not None
+    rx_4k.close()
+    print("[PASS] test_custom_dimensions (Accepts 3840x2160 configuration)")
+
 if __name__ == "__main__":
     test_import()
     test_exception_hierarchy()
     test_native_module()
     test_unsupported_codec_rejection()
+    test_custom_dimensions()
     print("\n--- All unit tests passed ---")

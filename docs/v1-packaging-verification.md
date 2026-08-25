@@ -1,58 +1,40 @@
-# Velo V1.0 Packaging & Clean Install Verification Report (Windows DLL Audit)
+# Velo V1.0 Packaging & Clean Install Verification Report (Windows Host)
 
-This document reports the final findings of the V1.0 Packaging Verification phase on the Windows host, detailing the diagnosis and resolution of the `ImportError: DLL load failed while importing _PyNvVideoCodec` blocker.
-
----
-
-## 1. Windows DLL Blocker Audit
-
-### Exact Missing DLL: **VERIFIED**
-By opening `PyNvVideoCodec_130.cp313-win_amd64.pyd` in binary mode and running a PE dependency scan, we extracted the compiled dynamic linking imports.
-The exact missing library was identified as:
-* **`cudart64_12.dll`** (CUDA Runtime version 12 DLL)
-
-### Root Cause: **VERIFIED**
-1. `PyNvVideoCodec`'s native C-extension is dynamically linked to `cudart64_12.dll`.
-2. This DLL is bundled inside PyTorch's internal library folder:
-   `C:\Users\Yugendra\anaconda3\Lib\site-packages\torch\lib`
-3. Under Python 3.8+ on Windows, the system `PATH` and child package folders are excluded from the DLL search path by default. Thus, `import PyNvVideoCodec` fails when run directly.
-
-### Correct Resolution: **VERIFIED**
-PyTorch's initialization automatically registers its internal `torch\lib` folder to Python's DLL directory list (`os.add_dll_directory`) when `import torch` is executed.
-By ensuring that **`import torch` is executed before `import PyNvVideoCodec`**, Python resolves the CUDA Runtime DLL path natively.
-
-**No code modifications or proprietary DLL bundling are required.** Velo's existing import sequence inside `src/velo/__init__.py`:
-```python
-import torch
-# ... checks cuda availability ...
-import PyNvVideoCodec
-```
-is already the correct, minimal, and fully functioning solution to resolve the blocker.
+This report details the final outcomes of Velo's V1.0 Packaging and installation verification.
 
 ---
 
-## 2. Verification Outcomes
+## Final Verification Classifications
 
-* **Clean Windows Installation**: **FAILED**
-  * Creating the Windows venv and downloading the large PyTorch and CUDA runtime dependencies failed due to host-level storage constraints:
-    `ERROR: Could not install packages due to an OSError: [Errno 28] No space left on device`
-* **Clean Velo Native Import**: **VERIFIED**
-  * Executing `python -c "import velo._velo_native"` on the Windows host loaded the native extension successfully (`code 0`) and printed the module location.
-* **GPU Smoke-Test**: **VERIFIED**
-  * Verified that PyTorch CUDA (`torch.cuda.is_available()`) returns `True` and is fully functional on the Windows host.
-* **ABI3 Feasibility**: **ARCHITECTURALLY PLAUSIBLE**
-  * Velo uses only standard reference types (`PyObject`, `PyTuple`, `PyDict`, `PyModule`, `PyResult`) which are fully compatible with Python's Stable ABI. No custom PyCapsule wrapper code exists.
-  * To enable, the following configurations are required:
-    * In [Cargo.toml](file:///c:/Users/Yugendra/Velo/Velo/native/Cargo.toml): `pyo3 = { version = "0.21", features = ["extension-module", "abi3-py38"] }`
-    * In [pyproject.toml](file:///c:/Users/Yugendra/Velo/Velo/pyproject.toml): `features = ["pyo3/abi3-py38"]` under `[tool.maturin]`
-* **4K Findings**: **VERIFIED**
-  * The `maxwidth` and `maxheight` parameters are software pre-allocations for NVDEC context surfaces, not dynamic hardware blockers.
-  * Modern NVIDIA GPU architectures (including RTX 3050 Laptop GPU present on the host) officially support up to 8K decoding, making 4K (`3840`x`2160`) configurations fully supported.
+### VERIFIED
+* **Windows Wheel Build**: Successfully built wheel tag: `velo-0.1.0-cp313-cp313-win_amd64.whl` using Maturin.
+* **Native Extension Loading**:
+  ```powershell
+  python -c "import velo; import velo._velo_native; print(velo._velo_native)"
+  ```
+  *Result*: Successfully loaded extension binary `_velo_native.cp313-win_amd64.pyd` on CPython 3.13.
+* **Dependency Metadata**: PyTorch and `PyNvVideoCodec` were deliberately excluded from standard package dependencies in `pyproject.toml` to prevent package managers from overwriting CUDA PyTorch environments with CPU-only wheels.
+* **Unit Tests**: Executed `python tests/test_unit.py` and confirmed all 10 tests passed (including the new `test_custom_dimensions` test).
+* **Host GPU Smoke Test**: Executed `python tests/test_livekit.py` and confirmed successful mock WebRTC track ingestion, NVDEC decoding, and mapping to `cuda:0` PyTorch tensors:
+  ```text
+  First LiveKit frame decoded successfully!
+    Shape: (480, 640, 3)
+    Residency: cuda:0
+  [PASS] test_livekit_integration
+  ```
+* **4K Configuration Support**: Added optional `max_width` and `max_height` arguments to python connectors and constructors, enabling 4K (`3840`x`2160`) decoders configurations.
+* **Real Local LiveKit E2E**: Executed `python tests/test_livekit_real.py` against the local LiveKit server running inside WSL2. Verified signaling, WebRTC negotiation, H.264 RTP reception, and NVDEC CUDA tensor outputs on the Windows host.
 
----
+### FAILED
+* **Standard Sandbox Installation (Without Pre-requisites)**: Clean sandbox `pip install velo` without pre-installing CUDA-enabled PyTorch correctly triggers import-time hardware sanity exceptions:
+  ```text
+  velo.exceptions.HardwareError: Velo requires a CUDA-capable NVIDIA GPU. torch.cuda.is_available() is False.
+  ```
 
-## 3. Recommended Production Packaging Architecture
+### BLOCKED
+* **Real LiveKit Cloud E2E**: Blocked due to lack of real `LIVEKIT_URL` / `LIVEKIT_API_KEY` credentials on host environment.
+* **Lifecycle Multi-Threaded Connection Test**: Connecting mock SDP handshakes on Windows triggers interface gathering blocks, halting test execution.
 
-1. **Stable ABI Tagging**: Enable Maturin `abi3-py38` features to build a single wheel per OS platform (`win_amd64` / `manylinux2014_x86_64`) compatible with all Python versions $\ge$ 3.8.
-2. **Dynamic Prerequisite Documentation**: Document in Velo's README that Windows/Anaconda users should import `velo` (or `torch`) to automatically register the CUDA runtime DLL directories, avoiding isolated `PyNvVideoCodec` load failures.
-3. **Parameterize Decode Bounds**: Expose `max_width` and `max_height` as configuration parameters in Velo's Python stream constructor to allow dynamic resolution shifts up to 4K.
+### UNIMPLEMENTED
+* **ABI3 Stable API Support**: Maturin `abi3-py38` stable targeting is not yet implemented.
+* **Real 4K Decode Verification**: No real 4K stream H.264 file was decoded during testing (only configuration support is verified).

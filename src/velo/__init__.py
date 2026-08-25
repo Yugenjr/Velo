@@ -7,6 +7,8 @@ from .exceptions import (
     DecodeError,
 )
 
+from .scheduler import AIScheduler, SchedulerClosedError
+
 # Strict environment dependency audit at import time
 try:
     import torch
@@ -49,4 +51,6 @@ __all__ = [
     "HardwareError",
     "StreamClosedError",
     "DecodeError",
+    "AIScheduler",
+    "SchedulerClosedError",
 ]
