@@ -4,110 +4,130 @@ import pytest
 from velo import AIScheduler, SchedulerClosedError
 
 class MockFrame:
-    def __init__(self, index):
+    def __init__(self, index, timestamp=None):
         self.index = index
+        if timestamp is not None:
+            self.timestamp = timestamp
 
-def test_scheduler_enforces_target_fps():
-    scheduler = AIScheduler(target_fps=10.0, max_queue=5)
-    # 10 FPS = 0.1s per frame
+def test_scheduler_acquire_release_fps():
+    scheduler = AIScheduler(target_fps=10.0, temporal_window=5.0, max_temporal_frames=10)
     
-    # Submit 3 frames instantly
-    for i in range(3):
-        scheduler.submit(MockFrame(i))
-        
+    # Producer thread simulating 100 FPS
+    def producer():
+        for i in range(10):
+            scheduler.submit(MockFrame(i))
+            time.sleep(0.01)
+            
+    t1 = threading.Thread(target=producer)
+    t1.start()
+    
     t0 = time.time()
-    f1 = scheduler.next()
-    f2 = scheduler.next()
-    f3 = scheduler.next()
-    t1 = time.time()
     
-    # Getting 3 frames at 10 FPS means 2 intervals between the 3 frames
-    # The first frame returns immediately. The second at +0.1s, third at +0.2s.
-    assert t1 - t0 >= 0.15, f"Elapsed time {t1 - t0} is too fast for 10 FPS"
-    assert f1.index == 0
-    assert f2.index == 1
-    assert f3.index == 2
+    # 10 FPS = 0.1s per frame
+    f1 = scheduler.acquire()
+    scheduler.release()
+    
+    f2 = scheduler.acquire()
+    scheduler.release()
+    
+    t1_end = time.time()
+    
+    # Time for 2 frames at 10 FPS is ~0.1s
+    assert t1_end - t0 >= 0.08
+    t1.join()
+    scheduler.close()
 
-def test_scheduler_queue_overflow_latest_frame():
-    scheduler = AIScheduler(target_fps=100.0, max_queue=2)
+def test_scheduler_temporal_buffer_snapshot():
+    scheduler = AIScheduler(target_fps=100.0, temporal_window=1.0, max_temporal_frames=10)
     
-    # Submit 5 frames instantly
+    # Submit 5 frames across 0.5s
+    for i in range(5):
+        scheduler.submit(MockFrame(i, timestamp=time.time()))
+        time.sleep(0.1)
+        
+    frames = scheduler.snapshot(duration=2.0)
+    assert len(frames) == 5
+    assert [f.index for f in frames] == [0, 1, 2, 3, 4]
+    
+    # Test shorter duration
+    frames_short = scheduler.snapshot(duration=0.25)
+    # The frames are spaced by 0.1s, so 0.25s should grab the last 2 or 3
+    assert len(frames_short) in (2, 3)
+    assert frames_short[-1].index == 4
+
+def test_scheduler_temporal_eviction_max_frames():
+    scheduler = AIScheduler(target_fps=100.0, temporal_window=5.0, max_temporal_frames=3)
+    
     for i in range(5):
         scheduler.submit(MockFrame(i))
         
-    # Queue size is 2, strategy="latest" drops oldest. 
-    # State after submissions: [3, 4]
-    
-    f1 = scheduler.next()
-    f2 = scheduler.next()
-    
-    assert f1.index == 3
-    assert f2.index == 4
+    frames = scheduler.snapshot(duration=5.0)
+    # The max_frames is 3, so only 2, 3, 4 should be retained
+    assert len(frames) == 3
+    assert frames[0].index == 2
+    assert frames[2].index == 4
     
     stats = scheduler.stats()
-    assert stats["frames_received"] == 5
-    assert stats["frames_dropped"] == 3
-    assert stats["frames_processed"] == 2
+    assert stats["frames_dropped_stale"] == 2
 
-def test_scheduler_concurrent_producer_consumer():
-    scheduler = AIScheduler(target_fps=20.0, max_queue=10)
-    consumed = []
+def test_scheduler_backpressure():
+    scheduler = AIScheduler(target_fps=20.0, temporal_window=5.0, max_temporal_frames=100)
     
-    def consumer():
-        try:
-            while True:
-                consumed.append(scheduler.next().index)
-        except SchedulerClosedError:
-            pass
-            
-    def producer():
-        for i in range(15):
-            scheduler.submit(MockFrame(i))
-            time.sleep(0.01) # Produce at 100 FPS
-        scheduler.close()
-        
-    t1 = threading.Thread(target=consumer)
-    t2 = threading.Thread(target=producer)
+    f1 = MockFrame(1)
+    f2 = MockFrame(2)
+    f3 = MockFrame(3)
     
-    t1.start()
-    t2.start()
+    # Submit first frame
+    scheduler.submit(f1)
     
-    t1.join()
-    t2.join()
+    # Acquire it (worker gets busy)
+    acq1 = scheduler.acquire()
+    assert acq1.index == 1
     
-    assert len(consumed) > 0
-    assert consumed[-1] == 14
+    # Submit more while busy
+    scheduler.submit(f2)
+    scheduler.submit(f3)
+    
+    # Release the first frame
+    scheduler.release()
+    
+    # Acquire next. We expect to get f3 because it's the latest, but wait!
+    # f2 should be marked as backpressure dropped.
+    acq2 = scheduler.acquire()
+    assert acq2.index == 3
+    scheduler.release()
+    
     stats = scheduler.stats()
-    assert stats["frames_received"] == 15
+    assert stats["frames_dropped_backpressure"] >= 1
+    assert stats["inference_busy_time"] > 0
 
 def test_scheduler_close_behavior():
-    scheduler = AIScheduler(target_fps=50.0, max_queue=5)
-    
+    scheduler = AIScheduler(target_fps=50.0)
     scheduler.submit(MockFrame(0))
-    scheduler.submit(MockFrame(1))
     scheduler.close()
     
-    # Should still yield remaining frames before raising
-    f1 = scheduler.next()
+    f1 = scheduler.acquire()
+    scheduler.release()
     assert f1.index == 0
-    f2 = scheduler.next()
-    assert f2.index == 1
     
     with pytest.raises(SchedulerClosedError):
-        scheduler.next()
+        scheduler.acquire()
 
 def test_scheduler_stats():
-    scheduler = AIScheduler(target_fps=100.0, max_queue=5)
+    scheduler = AIScheduler(target_fps=100.0, temporal_window=5.0)
     
-    for i in range(3):
-        scheduler.submit(MockFrame(i))
-        
-    scheduler.next()
-    scheduler.next()
+    scheduler.submit(MockFrame(0, timestamp=time.time() - 0.5))
+    scheduler.submit(MockFrame(1, timestamp=time.time() - 0.1))
+    
+    scheduler.acquire()
+    scheduler.release()
+    
+    scheduler.submit(MockFrame(2, timestamp=time.time()))
+    scheduler.acquire()
+    scheduler.release()
     
     stats = scheduler.stats()
     assert stats["frames_received"] == 3
     assert stats["frames_processed"] == 2
-    assert stats["frames_dropped"] == 0
-    assert stats["average_queue_depth"] > 0
-    assert stats["average_frame_age"] >= 0
+    assert stats["average_frame_age"] > 0
+    assert stats["effective_inference_fps"] > 0

@@ -2,7 +2,7 @@
 Velo AIScheduler Real LiveKit Integration Test
 
 Connects to a LiveKit stream, feeds frames to AIScheduler,
-and measures the incoming rate vs the scheduled rate.
+and simulates an AI inference worker using acquire/release backpressure.
 """
 import os
 import sys
@@ -50,7 +50,7 @@ def run_scheduler_verification():
         sys.exit(1)
 
     TARGET_FPS = 5.0
-    scheduler = velo.AIScheduler(target_fps=TARGET_FPS, max_queue=2, strategy="latest")
+    scheduler = velo.AIScheduler(target_fps=TARGET_FPS, temporal_window=5.0, max_temporal_frames=150)
     
     producer_active = True
 
@@ -69,7 +69,7 @@ def run_scheduler_verification():
     producer_thread = threading.Thread(target=producer, daemon=True)
     producer_thread.start()
 
-    print(f"[INFO] Processing frames at target FPS: {TARGET_FPS}...")
+    print(f"[INFO] Processing frames at target FPS: {TARGET_FPS} with simulated inference time...")
     
     start_time = time.time()
     frames_processed = 0
@@ -78,9 +78,12 @@ def run_scheduler_verification():
     try:
         while time.time() - start_time < duration:
             try:
-                frame = scheduler.next()
+                frame = scheduler.acquire()
                 tensor = frame.to_torch()
+                # Simulate VLM taking time to process (e.g., 200ms)
+                time.sleep(0.2)
                 frames_processed += 1
+                scheduler.release()
             except velo.SchedulerClosedError:
                 break
     except KeyboardInterrupt:
@@ -99,11 +102,19 @@ def run_scheduler_verification():
     print(f"Target FPS: {TARGET_FPS:.2f}")
     print(f"Frames Received (Incoming): {stats['frames_received']}")
     print(f"Frames Processed (Yielded): {stats['frames_processed']}")
-    print(f"Frames Dropped: {stats['frames_dropped']}")
-    print(f"Average Queue Depth: {stats['average_queue_depth']:.2f}")
+    print(f"Frames Dropped (Stale): {stats['frames_dropped_stale']}")
+    print(f"Frames Dropped (Backpressure): {stats['frames_dropped_backpressure']}")
+    print(f"Current Queue Depth: {stats['current_queue_depth']}")
+    print(f"Max Queue Depth: {stats['max_queue_depth']}")
     print(f"Average Frame Age (Latency): {stats['average_frame_age'] * 1000:.2f} ms")
-    print(f"Effective Processed FPS: {stats['effective_fps']:.2f}")
+    print(f"Inference Busy Time: {stats['inference_busy_time']:.2f} s")
+    print(f"Effective Processed FPS: {stats['effective_inference_fps']:.2f}")
     print("=" * 50)
+    
+    # Test a snapshot
+    print("[INFO] Attempting snapshot...")
+    snapshot = scheduler.snapshot(duration=2.0, max_frames=5)
+    print(f"[SUCCESS] Snapshot returned {len(snapshot)} frames.")
 
 if __name__ == "__main__":
     run_scheduler_verification()

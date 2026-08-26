@@ -8,6 +8,10 @@ from .exceptions import (
 )
 
 from .scheduler import AIScheduler, SchedulerClosedError
+from .vlm import BaseVLMAdapter, MockVLM, SmolVLMAdapter, VLMResponse
+from .preprocess import GPUPreprocessor
+from .scene import SceneChangeDetector, ChangeResult
+from .pipeline import AIPipeline, PipelineState
 
 # Strict environment dependency audit at import time
 try:
@@ -53,4 +57,13 @@ __all__ = [
     "DecodeError",
     "AIScheduler",
     "SchedulerClosedError",
+    "BaseVLMAdapter",
+    "MockVLM",
+    "SmolVLMAdapter",
+    "VLMResponse",
+    "GPUPreprocessor",
+    "SceneChangeDetector",
+    "ChangeResult",
+    "AIPipeline",
+    "PipelineState",
 ]
