@@ -10,6 +10,7 @@ if os.path.exists(dll_path):
     shutil.copyfile(dll_path, pyd_path)
     
 try:
+    # pyrefly: ignore [missing-import]
     import velo_native
     print("SUCCESS: Imported velo_native")
     print(f"VERSION: {velo_native.version()}")

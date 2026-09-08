@@ -8,10 +8,17 @@ from .exceptions import (
 )
 
 from .scheduler import AIScheduler, SchedulerClosedError
-from .vlm import BaseVLMAdapter, MockVLM, SmolVLMAdapter, VLMResponse
+from .vlm import BaseVLMAdapter, BaseMultimodalAdapter, MockVLM, MockMultimodalAdapter, SmolVLMAdapter, VLMResponse
 from .preprocess import GPUPreprocessor
 from .scene import SceneChangeDetector, ChangeResult
+from .candidate import CandidateSelector, CandidateScore
 from .pipeline import AIPipeline, PipelineState
+
+from .audio import AudioChunk
+from .audio_scheduler import AudioScheduler
+from .vad import VAD, VoiceActivityResult
+from .asr import BaseASRAdapter, MockASRAdapter, Transcript
+from .fusion import TemporalFusion, MultimodalContext, Observation, VideoObservation, AudioObservation
 
 # Strict environment dependency audit at import time
 try:
@@ -58,7 +65,9 @@ __all__ = [
     "AIScheduler",
     "SchedulerClosedError",
     "BaseVLMAdapter",
+    "BaseMultimodalAdapter",
     "MockVLM",
+    "MockMultimodalAdapter",
     "SmolVLMAdapter",
     "VLMResponse",
     "GPUPreprocessor",
@@ -66,4 +75,16 @@ __all__ = [
     "ChangeResult",
     "AIPipeline",
     "PipelineState",
+    "AudioChunk",
+    "AudioScheduler",
+    "VAD",
+    "VoiceActivityResult",
+    "BaseASRAdapter",
+    "MockASRAdapter",
+    "Transcript",
+    "TemporalFusion",
+    "MultimodalContext",
+    "Observation",
+    "VideoObservation",
+    "AudioObservation",
 ]

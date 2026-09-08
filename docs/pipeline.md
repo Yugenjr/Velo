@@ -22,6 +22,8 @@ AIScheduler.submit()
 (Inference Worker Thread)
 AIScheduler.acquire()  ─── gate ───> SceneChangeDetector
       ↓
+(Candidate Gate) ─────── gate ───> CandidateSelector
+      ↓
 GPUPreprocessor
       ↓
 VLMAdapter.generate()
@@ -86,3 +88,7 @@ If the VLM inference takes 5 seconds, the ingestion thread continues receiving W
 ## Advanced Usage
 If you need absolute control over thread scheduling, multiple simultaneous VLMs, or custom ML hardware queues, do not use `AIPipeline`.
 Instead, manually construct the `Stream` and `AIScheduler` and wire the loops yourself as described in the Core API documentation.
+
+## Audio Constraints
+> [!WARNING]
+> The current `AIPipeline` is designed exclusively for **video** inference. Native WebRTC audio ingestion is currently unimplemented in the core C++/Rust backend. Velo V1.6 provides Python abstractions (`AudioScheduler`, `VAD`, `ASRAdapter`) in the `velo.audio` module for mock testing, but these are not yet wired into the `AIPipeline`.

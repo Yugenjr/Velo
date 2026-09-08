@@ -11,7 +11,7 @@ LIVEKIT_URL = os.environ.get("LIVEKIT_URL", "ws://localhost:7880")
 API_KEY = os.environ.get("LIVEKIT_API_KEY")
 API_SECRET = os.environ.get("LIVEKIT_API_SECRET")
 
-if not API_KEY or not API_SECRET:
+if __name__ == "__main__" and (not API_KEY or not API_SECRET):
     print("LIVEKIT_API_KEY and LIVEKIT_API_SECRET must be set to run test_hardening.py")
     sys.exit(1)
 

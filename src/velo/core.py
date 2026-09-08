@@ -1,6 +1,7 @@
 import torch
 from . import _velo_native
 from .exceptions import StreamClosedError
+from .audio import AudioChunk
 
 
 class Frame:
@@ -50,12 +51,13 @@ class Frame:
 
 class Stream:
     """
-    A live WebRTC video stream producing GPU-decoded frames.
+    A live WebRTC media stream producing GPU-decoded video frames and decoded audio chunks.
 
     Lifecycle::
 
         stream, sdp_answer = velo.connect(sdp_offer)
         frame = stream.next()
+        audio_chunk = stream.next_audio()
         tensor = frame.to_torch()
         stream.close()
     """
@@ -66,7 +68,7 @@ class Stream:
 
     def next(self) -> Frame:
         """
-        Block until the next decoded frame is available.
+        Block until the next decoded video frame is available.
 
         Releases the Python GIL internally so other threads can proceed.
 
@@ -76,6 +78,36 @@ class Stream:
         try:
             capsule, decoder = self._native.next_frame()
             return Frame(capsule, decoder)
+        except Exception as e:
+            if "StreamClosed" in type(e).__name__ or "StreamClosed" in str(e):
+                raise StreamClosedError(str(e)) from None
+            raise
+
+    def next_audio(self) -> AudioChunk:
+        """
+        Block until the next decoded audio chunk is available.
+
+        Releases the Python GIL internally so other threads can proceed.
+
+        Returns:
+            AudioChunk: containing decoded PCM audio samples as a float32 tensor
+            normalized in [-1.0, 1.0], sample_rate, channels, timestamp, and duration.
+
+        Raises:
+            StreamClosedError: if the peer disconnected or close() was called.
+        """
+        try:
+            raw_bytes, timestamp, channels, sample_rate, duration = self._native.next_audio()
+            int_samples = torch.frombuffer(raw_bytes, dtype=torch.int16)
+            # Convert to float32 in [-1.0, 1.0] for downstream VAD/ASR compatibility
+            samples = int_samples.to(torch.float32) / 32768.0
+            return AudioChunk(
+                samples=samples,
+                sample_rate=int(sample_rate),
+                channels=int(channels),
+                timestamp=float(timestamp),
+                duration=float(duration),
+            )
         except Exception as e:
             if "StreamClosed" in type(e).__name__ or "StreamClosed" in str(e):
                 raise StreamClosedError(str(e)) from None

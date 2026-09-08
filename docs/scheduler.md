@@ -4,7 +4,7 @@
 
 In a typical WebRTC or CCTV pipeline, video frames arrive at 30 or 60 Frames Per Second (FPS). While a GPU hardware decoder (NVDEC) can easily process these frames in real-time without blocking the CPU, modern multimodal AI models (e.g., Vision-Language Models like Qwen-VL or LLaVA) are computationally expensive and typically run at much lower framerates—often between 1 and 5 FPS.
 
-If Velo blindly handed every single 30 FPS decoded frame to a VLM, the AI queue would rapidly overflow, causing massive multi-second latency and ultimately OOM (Out-Of-Memory) crashes. 
+If Velo blindly handed every single 30 FPS decoded frame to a VLM, the AI queue would rapidly overflow, causing massive multi-second latency and ultimately OOM (Out-Of-Memory) crashes.
 
 **The AI-Aware Scheduler solves this impedance mismatch by providing a model-aware temporal buffer.**
 
@@ -38,9 +38,9 @@ VLM Adapter
 
 ## How Velo differs from DeepStream
 
-NVIDIA DeepStream is an industry-standard video analytics SDK. It is designed for massive camera fleets and traditional object detection / tracking pipelines. DeepStream treats every frame equally and runs them through rigid metadata graphs (GStreamer). 
+NVIDIA DeepStream is an industry-standard video analytics SDK. It is designed for massive camera fleets and traditional object detection / tracking pipelines. DeepStream treats every frame equally and runs them through rigid metadata graphs (GStreamer).
 
-Velo, conversely, is an agile inference bridge. It does not treat video analytics as a fixed graph. Instead, Velo positions the **GPU-resident tensor** as the core abstraction. 
+Velo, conversely, is an agile inference bridge. It does not treat video analytics as a fixed graph. Instead, Velo positions the **GPU-resident tensor** as the core abstraction.
 
 Its purpose is to make realtime media usable by multimodal AI models while minimizing unnecessary buffering, memory movement, and inference on stale frames.
 
@@ -56,24 +56,32 @@ To avoid redundant VLM inference on visually static frames, Velo introduces **Sc
 
 *Note: This is a temporal visual-change heuristic, not a semantic understanding model. It only measures pixel/luminance shifts to reduce redundant work.*
 
-```text
-                    ┌── unchanged ──→ skip AI
-                    │
-Incoming Frame → Scheduler → Change Detector
-                    │
-                    └── changed ───→ VLM
-                                      ↓
-                                  AI Response
-```
-
 When `scene_aware=True`, the scheduler behaves exactly as before (buffering 30 FPS history in the temporal window), but the inference thread pulling from `.acquire()` will silently skip and wait for the next frame if the current frame is visually identical to the last analyzed frame.
+
+## Semantic Candidate Selection (V1.5)
+
+While `SceneChangeDetector` asks "Did the visual content change?", the **CandidateSelector** (`candidate_aware=True`) asks "Is this change worth spending inference compute on?".
+
+The candidate selector sits between scene detection and the VLM. It operates strictly on cheap, deterministic visual signals (change magnitude, spatial variance, and temporal cooldown lockouts) to reject low-information frames that shouldn't consume expensive VLM cycles.
+
+```text
+                     ┌── unchanged ──→ skip AI
+                     │
+Incoming Frame → SceneDetector
+                     │
+                     └── changed ───→ CandidateSelector ─── rejected ──→ skip AI
+                                              │
+                                              └── accepted ──→ VLM
+                                                                ↓
+                                                            AI Response
+```
 
 **Why this differs from conventional video pipelines:**
 The scheduler is optimizing for AI inference workload rather than simply maintaining a media pipeline. By accumulating subtle changes in a 64x64 luminance tensor, Velo drops unnecessary VLM requests while keeping the temporal buffer perfectly intact for historical context.
 
 ## Adaptive AI-Aware Scheduling (V1.4)
 
-While early versions used a fixed `target_fps` to throttle inference, V1.4 introduces **Adaptive Scheduling**. Multimodal models have highly variable latencies depending on prompt complexity, image context, and background hardware contention. 
+While early versions used a fixed `target_fps` to throttle inference, V1.4 introduces **Adaptive Scheduling**. Multimodal models have highly variable latencies depending on prompt complexity, image context, and background hardware contention.
 
 If the model is given a strict 10 FPS target but can only physically execute at 3 FPS, a fixed scheduler will struggle, and the system might fall behind real-time.
 

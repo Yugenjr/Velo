@@ -1,14 +1,25 @@
 import time
-from typing import Union, List
+from typing import Union, List, Optional, Any
 from .core import Frame
 
 
 class VLMResponse:
-    """Standardized response from a VLM adapter."""
-    def __init__(self, text: str, latency_ms: float = 0.0, preprocessing_latency_ms: float = 0.0):
+    """Standardized response from a VLM / multimodal adapter."""
+    def __init__(
+        self,
+        text: str,
+        latency_ms: float = 0.0,
+        preprocessing_latency_ms: float = 0.0,
+        timestamp: Optional[float] = None,
+        transcripts: Optional[List[Any]] = None,
+        context: Optional[Any] = None,
+    ):
         self.text = text
         self.latency_ms = latency_ms
         self.preprocessing_latency_ms = preprocessing_latency_ms
+        self.timestamp = timestamp
+        self.transcripts = transcripts if transcripts is not None else []
+        self.context = context
 
 
 class BaseVLMAdapter:
@@ -18,16 +29,73 @@ class BaseVLMAdapter:
     Decouples the specific multimodal AI model implementation from Velo's
     GPU-native scheduling pipeline.
     """
-    def generate(self, frames: Union[Frame, List[Frame]], prompt: str) -> VLMResponse:
+    def generate(
+        self,
+        frames: Union[Frame, List[Frame]],
+        prompt: str,
+        context: Optional[Any] = None,
+        transcripts: Optional[List[Any]] = None,
+    ) -> VLMResponse:
         """
         Run inference on a single frame or a temporal sequence of frames.
         
         Args:
             frames: A single velo.Frame or a list of velo.Frame objects.
             prompt: The text prompt describing what the model should look for.
+            context: Optional MultimodalContext containing aligned observations.
+            transcripts: Optional list of Transcripts or audio observations.
             
         Returns:
-            VLMResponse containing the generated text and latency metrics.
+            VLMResponse containing the generated text, metrics, and temporal context.
+        """
+        raise NotImplementedError
+
+
+class BaseMultimodalAdapter(BaseVLMAdapter):
+    """
+    Model-facing abstraction for multimodal inference (video frames + audio/transcripts).
+    """
+    def generate(
+        self,
+        frames: Union[Frame, List[Frame]],
+        prompt: str,
+        context: Optional[Any] = None,
+        transcripts: Optional[List[Any]] = None,
+    ) -> VLMResponse:
+        ts = None
+        if isinstance(frames, list) and len(frames) > 0:
+            ts = getattr(frames[-1], "timestamp", None)
+        elif not isinstance(frames, list):
+            ts = getattr(frames, "timestamp", None)
+            
+        return self.infer(
+            frames=frames,
+            transcripts=transcripts,
+            timestamp=ts,
+            prompt=prompt,
+            context=context,
+        )
+
+    def infer(
+        self,
+        frames: Union[Frame, List[Frame]],
+        transcripts: Optional[List[Any]] = None,
+        timestamp: Optional[float] = None,
+        prompt: str = "",
+        context: Optional[Any] = None,
+    ) -> VLMResponse:
+        """
+        Run multimodal inference on synchronized video frames and audio/transcripts.
+        
+        Args:
+            frames: Single or sequence of GPU-resident Frame objects.
+            transcripts: List of Transcript objects overlapping with the temporal window.
+            timestamp: Target reference timestamp for correlation.
+            prompt: Text prompt / instruction.
+            context: Full MultimodalContext object if available.
+            
+        Returns:
+            VLMResponse with generated text and timing metrics.
         """
         raise NotImplementedError
 
@@ -40,22 +108,89 @@ class MockVLM(BaseVLMAdapter):
     def __init__(self, simulated_latency: float = 0.1):
         self.simulated_latency = simulated_latency
         
-    def generate(self, frames: Union[Frame, List[Frame]], prompt: str) -> VLMResponse:
+    def generate(
+        self,
+        frames: Union[Frame, List[Frame]],
+        prompt: str,
+        context: Optional[Any] = None,
+        transcripts: Optional[List[Any]] = None,
+    ) -> VLMResponse:
         t0 = time.time()
         
         if isinstance(frames, list):
             num_frames = len(frames)
+            ts = getattr(frames[-1], "timestamp", None) if frames else None
         else:
             num_frames = 1
+            ts = getattr(frames, "timestamp", None)
             
-        time.sleep(self.simulated_latency)
+        if self.simulated_latency > 0:
+            time.sleep(self.simulated_latency)
         
         text = f"Mock response for {num_frames} frames with prompt: '{prompt}'"
         
         t1 = time.time()
         latency_ms = (t1 - t0) * 1000
         
-        return VLMResponse(text=text, latency_ms=latency_ms, preprocessing_latency_ms=0.0)
+        return VLMResponse(
+            text=text,
+            latency_ms=latency_ms,
+            preprocessing_latency_ms=0.0,
+            timestamp=ts,
+            transcripts=transcripts,
+            context=context,
+        )
+
+
+class MockMultimodalAdapter(BaseMultimodalAdapter):
+    """
+    A mock multimodal adapter for testing video + audio/transcript integration.
+    """
+    def __init__(self, simulated_latency: float = 0.05):
+        self.simulated_latency = simulated_latency
+
+    def infer(
+        self,
+        frames: Union[Frame, List[Frame]],
+        transcripts: Optional[List[Any]] = None,
+        timestamp: Optional[float] = None,
+        prompt: str = "",
+        context: Optional[Any] = None,
+    ) -> VLMResponse:
+        t0 = time.time()
+        if isinstance(frames, list):
+            num_frames = len(frames)
+            if timestamp is None and frames:
+                timestamp = getattr(frames[-1], "timestamp", None)
+        else:
+            num_frames = 1
+            if timestamp is None:
+                timestamp = getattr(frames, "timestamp", None)
+
+        if self.simulated_latency > 0:
+            time.sleep(self.simulated_latency)
+
+        transcript_texts = []
+        if transcripts:
+            for t in transcripts:
+                if hasattr(t, "text"):
+                    transcript_texts.append(t.text)
+                elif isinstance(t, str):
+                    transcript_texts.append(t)
+        
+        joined_transcript = "; ".join(transcript_texts) if transcript_texts else "None"
+        text = f"Multimodal response for {num_frames} frames (ts={timestamp}) with transcript: '{joined_transcript}', prompt: '{prompt}'"
+        t1 = time.time()
+        latency_ms = (t1 - t0) * 1000
+
+        return VLMResponse(
+            text=text,
+            latency_ms=latency_ms,
+            preprocessing_latency_ms=0.0,
+            timestamp=timestamp,
+            transcripts=transcripts,
+            context=context,
+        )
 
 
 class SmolVLMAdapter(BaseVLMAdapter):
@@ -106,7 +241,13 @@ class SmolVLMAdapter(BaseVLMAdapter):
         array = tensor.cpu().numpy()
         return Image.fromarray(array)
 
-    def generate(self, frames: Union[Frame, List[Frame]], prompt: str) -> VLMResponse:
+    def generate(
+        self,
+        frames: Union[Frame, List[Frame]],
+        prompt: str,
+        context: Optional[Any] = None,
+        transcripts: Optional[List[Any]] = None,
+    ) -> VLMResponse:
         import time
         import torch
         
@@ -118,6 +259,21 @@ class SmolVLMAdapter(BaseVLMAdapter):
         if not frames:
             raise ValueError("At least one frame is required for VLM inference.")
             
+        timestamp = getattr(frames[-1], "timestamp", None) if frames else None
+
+        # If transcripts are provided, augment the prompt with temporal speech context
+        effective_prompt = prompt
+        if transcripts:
+            transcript_texts = []
+            for t in transcripts:
+                if hasattr(t, "text"):
+                    transcript_texts.append(t.text)
+                elif isinstance(t, str):
+                    transcript_texts.append(t)
+            if transcript_texts:
+                context_speech = "; ".join(transcript_texts)
+                effective_prompt = f"[Audio context: '{context_speech}'] {prompt}"
+
         if self.use_gpu_preprocess:
             # PATH B: GPU Preprocessing (Zero-Copy)
             # 1. Preprocessing (GPU -> CUDA Tensor)
@@ -133,7 +289,7 @@ class SmolVLMAdapter(BaseVLMAdapter):
             
             # Still need text tokens from processor
             content = [{"type": "image"} for _ in frames]
-            content.append({"type": "text", "text": prompt})
+            content.append({"type": "text", "text": effective_prompt})
             messages = [{"role": "user", "content": content}]
             prompt_text = self.processor.apply_chat_template(messages, add_generation_prompt=True)
             
@@ -159,7 +315,7 @@ class SmolVLMAdapter(BaseVLMAdapter):
             
             # Construct HuggingFace messages for SmolVLM
             content = [{"type": "image"} for _ in frames]
-            content.append({"type": "text", "text": prompt})
+            content.append({"type": "text", "text": effective_prompt})
             
             messages = [{"role": "user", "content": content}]
             
@@ -185,5 +341,8 @@ class SmolVLMAdapter(BaseVLMAdapter):
         return VLMResponse(
             text=generated_texts[0],
             latency_ms=inference_latency,
-            preprocessing_latency_ms=preprocessing_latency
+            preprocessing_latency_ms=preprocessing_latency,
+            timestamp=timestamp,
+            transcripts=transcripts,
+            context=context,
         )

@@ -6,7 +6,7 @@ use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use tokio::runtime::Runtime;
 use crossbeam_channel::{bounded, Receiver};
 use bytes::Bytes;
-use webrtc::api::media_engine::{MediaEngine, MIME_TYPE_H264};
+use webrtc::api::media_engine::{MediaEngine, MIME_TYPE_H264, MIME_TYPE_OPUS};
 use webrtc::api::APIBuilder;
 use webrtc::api::interceptor_registry::register_default_interceptors;
 use webrtc::interceptor::registry::Registry;
@@ -16,6 +16,7 @@ use webrtc::rtp_transceiver::rtp_codec::{RTCRtpCodecCapability, RTCRtpCodecParam
 use webrtc::rtp_transceiver::RTCPFeedback;
 use rtp::codecs::h264::H264Packet;
 use std::thread::{self, JoinHandle};
+use std::time::Instant;
 
 // ---------------------------------------------------------------------------
 // Python exception hierarchy
@@ -74,6 +75,7 @@ type OfferMessage = (String, crossbeam_channel::Sender<Result<String, String>>);
 struct NativeStream {
     /// Receives decoded GPU frames from the worker thread.
     frame_rx: Receiver<PyObject>,
+    audio_rx: Receiver<PyObject>,
     /// Keeps the NVDEC decoder (and its CUDA context) alive for DLPack validity.
     decoder_obj: PyObject,
     /// Signals the worker thread to shut down.
@@ -124,12 +126,30 @@ impl NativeStream {
         }
     }
 
+    /// Block until the next decoded audio chunk arrives.
+    /// Returns (pcm_bytes, timestamp, channels, sample_rate, duration) as a tuple.
+    /// Releases the Python GIL while waiting.
+    fn next_audio(&self, py: Python) -> PyResult<PyObject> {
+        if self.closed.load(Ordering::SeqCst) {
+            return Err(StreamClosedError::new_err("Stream is closed"));
+        }
+
+        let audio_opt = py.allow_threads(|| self.audio_rx.recv().ok());
+
+        match audio_opt {
+            Some(chunk) => Ok(chunk),
+            None => Err(StreamClosedError::new_err(
+                "Stream closed or peer disconnected",
+            )),
+        }
+    }
+
     /// Gracefully shut down the stream.
     ///
     /// 1. Signal the worker thread to stop.
     /// 2. Release the GIL and join the worker thread (so it can finish
     ///    its current GIL-holding decode without deadlocking).
-    /// 3. Drain any remaining frames from the queue under the GIL.
+    /// 3. Drain any remaining frames and audio chunks from the queues under the GIL.
     ///
     /// Idempotent — safe to call multiple times.
     fn close(&self, py: Python) {
@@ -151,8 +171,11 @@ impl NativeStream {
             });
         }
 
-        // 3. Drain remaining PyObject frames under the GIL (safe destruction)
+        // 3. Drain remaining PyObject frames and audio chunks under the GIL (safe destruction)
         while let Ok(_frame) = self.frame_rx.try_recv() {
+            // Dropped here with GIL held — correct ref-count decrement
+        }
+        while let Ok(_audio) = self.audio_rx.try_recv() {
             // Dropped here with GIL held — correct ref-count decrement
         }
     }
@@ -209,9 +232,12 @@ async fn run_connection_setup(
     error_count: Arc<AtomicU64>,
     nvdec: Arc<NvDecoder>,
     frame_tx: crossbeam_channel::Sender<PyObject>,
+    audio_tx: crossbeam_channel::Sender<PyObject>,
     drain_rx: crossbeam_channel::Receiver<PyObject>,
+    audio_drain_rx: crossbeam_channel::Receiver<PyObject>,
     sdp_tx: crossbeam_channel::Sender<Result<String, String>>,
     offer_rx: crossbeam_channel::Receiver<OfferMessage>,
+    start_time: Instant,
 ) {
     // ---- WebRTC setup ----
     let mut m = MediaEngine::default();
@@ -221,6 +247,24 @@ async fn run_connection_setup(
         RTCPFeedback { typ: "nack".into(), parameter: "".into() },
         RTCPFeedback { typ: "nack".into(), parameter: "pli".into() },
     ];
+
+    if let Err(e) = m.register_codec(
+        RTCRtpCodecParameters {
+            capability: RTCRtpCodecCapability {
+                mime_type: MIME_TYPE_OPUS.to_owned(),
+                clock_rate: 48000,
+                channels: 2,
+                sdp_fmtp_line: "minptime=10;useinbandfec=1".to_owned(),
+                rtcp_feedback: vec![],
+            },
+            payload_type: 111,
+            ..Default::default()
+        },
+        RTPCodecType::Audio,
+    ) {
+        let _ = sdp_tx.send(Err(format!("Failed to register Opus codec: {:?}", e)));
+        return;
+    }
 
     // Register multiple H.264 profiles
     for (fmtp, pt) in [
@@ -247,7 +291,7 @@ async fn run_connection_setup(
         }
     }
 
-    let mut registry = Registry::new();
+    let registry = Registry::new();
     let mut m = m;
     let registry = match register_default_interceptors(registry, &mut m) {
         Ok(r) => r,
@@ -281,12 +325,16 @@ async fn run_connection_setup(
 
     // ---- Track handler ----
     let tx = frame_tx;
+    let audio_tx_clone = audio_tx.clone();
+    let audio_drain_clone = audio_drain_rx.clone();
     let nvdec_track = nvdec.clone();
     let shutdown_track = shutdown.clone();
 
     pc.on_track(Box::new(move |track, _receiver, _transceiver| {
         let track = track.clone();
         let tx = tx.clone();
+        let audio_tx = audio_tx_clone.clone();
+        let audio_drain = audio_drain_clone.clone();
         let drain_rx = drain_rx.clone();
         let nvdec_t = nvdec_track.clone();
         let shutdown_t = shutdown_track.clone();
@@ -295,6 +343,88 @@ async fn run_connection_setup(
 
         Box::pin(async move {
             let codec = track.codec().capability.mime_type.to_lowercase();
+
+            if codec == MIME_TYPE_OPUS.to_lowercase() {
+                tokio::spawn(async move {
+                    let mut decoder = match opus::Decoder::new(48000, opus::Channels::Stereo) {
+                        Ok(d) => d,
+                        Err(e) => {
+                            eprintln!("[velo] Failed to create Opus decoder: {:?}", e);
+                            return;
+                        }
+                    };
+                    let mut first_packet = true;
+                    let mut anchor_rtp: u32 = 0;
+                    let mut anchor_time: f64 = 0.0;
+
+                    loop {
+                        if shutdown_t.load(Ordering::Relaxed) {
+                            break;
+                        }
+
+                        let read_res = tokio::time::timeout(
+                            std::time::Duration::from_secs(5),
+                            track.read_rtp()
+                        ).await;
+
+                        let rtp_pkt = match read_res {
+                            Ok(Ok((pkt, _))) => pkt,
+                            Ok(Err(e)) => {
+                                eprintln!("[velo] WebRTC audio track read error: {:?}", e);
+                                break;
+                            }
+                            Err(_) => {
+                                eprintln!("[velo] WebRTC audio track read timeout");
+                                break;
+                            }
+                        };
+
+                        let ts = rtp_pkt.header.timestamp;
+                        let payload = rtp_pkt.payload;
+
+                        let elapsed = start_time.elapsed().as_secs_f64();
+                        if first_packet {
+                            anchor_rtp = ts;
+                            anchor_time = elapsed;
+                            first_packet = false;
+                        }
+                        let relative_s = anchor_time + (ts.wrapping_sub(anchor_rtp)) as f64 / 48000.0;
+
+                        let mut pcm = vec![0i16; 5760 * 2];
+                        match decoder.decode(&payload, &mut pcm, false) {
+                            Ok(len) => {
+                                let num_samples = len * 2;
+                                pcm.truncate(num_samples);
+                                let duration = len as f64 / 48000.0;
+                                let byte_slice = unsafe {
+                                    std::slice::from_raw_parts(
+                                        pcm.as_ptr() as *const u8,
+                                        pcm.len() * 2
+                                    )
+                                };
+
+                                Python::with_gil(|py| {
+                                    while audio_tx.is_full() {
+                                        let _ = audio_drain.try_recv();
+                                    }
+                                    let py_bytes = pyo3::types::PyBytes::new_bound(py, byte_slice);
+                                    let tuple = pyo3::types::PyTuple::new_bound(py, &[
+                                        py_bytes.into_any(),
+                                        pyo3::types::PyFloat::new_bound(py, relative_s).into_any(),
+                                        2i32.into_py(py).into_bound(py),
+                                        48000i32.into_py(py).into_bound(py),
+                                        pyo3::types::PyFloat::new_bound(py, duration).into_any(),
+                                    ]);
+                                    let _ = audio_tx.send(tuple.into_py(py));
+                                });
+                            }
+                            Err(e) => eprintln!("[velo] Opus decode error: {:?}", e),
+                        }
+                    }
+                });
+                return;
+            }
+
             if codec != MIME_TYPE_H264.to_lowercase() {
                 return;
             }
@@ -304,6 +434,8 @@ async fn run_connection_setup(
                 let mut nal_buffer: Vec<u8> = Vec::with_capacity(65536);
                 let mut current_ts: u32 = 0;
                 let mut first_packet = true;
+                let mut anchor_rtp: u32 = 0;
+                let mut anchor_time: f64 = 0.0;
 
                 loop {
                     if shutdown_t.load(Ordering::Relaxed) {
@@ -339,6 +471,7 @@ async fn run_connection_setup(
                     };
 
                     if !first_packet && ts != current_ts && !nal_buffer.is_empty() {
+                        let relative_s = anchor_time + (current_ts.wrapping_sub(anchor_rtp)) as f64 / 90000.0;
                         Python::with_gil(|py| {
                             match nvdec_t.decode(py, &nal_buffer) {
                                 Ok(frames) => {
@@ -348,7 +481,11 @@ async fn run_connection_setup(
                                                 dropped_t.fetch_add(1, Ordering::Relaxed);
                                             }
                                         }
-                                        let _ = tx.send(frame);
+                                        let tuple = pyo3::types::PyTuple::new_bound(py, &[
+                                            frame.into_bound(py).into_any(),
+                                            pyo3::types::PyFloat::new_bound(py, relative_s).into_any()
+                                        ]);
+                                        let _ = tx.send(tuple.into_py(py));
                                     }
                                 }
                                 Err(e) => {
@@ -360,13 +497,19 @@ async fn run_connection_setup(
                         nal_buffer.clear();
                     }
 
-                    first_packet = false;
+                    let elapsed = start_time.elapsed().as_secs_f64();
+                    if first_packet {
+                        anchor_rtp = ts;
+                        anchor_time = elapsed;
+                        first_packet = false;
+                    }
                     current_ts = ts;
                     nal_buffer.extend_from_slice(&[0x00, 0x00, 0x00, 0x01]);
                     nal_buffer.extend_from_slice(&nal_bytes);
                 }
 
                 if !nal_buffer.is_empty() {
+                    let relative_s = anchor_time + (current_ts.wrapping_sub(anchor_rtp)) as f64 / 90000.0;
                     Python::with_gil(|py| {
                         match nvdec_t.decode(py, &nal_buffer) {
                             Ok(frames) => {
@@ -376,7 +519,11 @@ async fn run_connection_setup(
                                             dropped_t.fetch_add(1, Ordering::Relaxed);
                                         }
                                     }
-                                    let _ = tx.send(frame);
+                                    let tuple = pyo3::types::PyTuple::new_bound(py, &[
+                                        frame.into_bound(py).into_any(),
+                                        pyo3::types::PyFloat::new_bound(py, relative_s).into_any()
+                                    ]);
+                                    let _ = tx.send(tuple.into_py(py));
                                 }
                             }
                             Err(e) => {
@@ -673,7 +820,11 @@ fn connect(py: Python, sdp_offer: String, max_width: Option<u32>, max_height: Op
 
     // ---- 2. Bounded frame queue ----
     let (frame_tx, frame_rx) = bounded::<PyObject>(3);
+    let (audio_tx, audio_rx) = bounded::<PyObject>(100);
     let drain_rx = frame_rx.clone();
+    let audio_drain_rx = audio_rx.clone();
+
+    let start_time = Instant::now();
 
     // ---- 3. Shutdown and metrics ----
     let shutdown = Arc::new(AtomicBool::new(false));
@@ -703,9 +854,12 @@ fn connect(py: Python, sdp_offer: String, max_width: Option<u32>, max_height: Op
                 errors_worker,
                 nvdec_for_worker,
                 frame_tx,
+                audio_tx,
                 drain_rx,
+                audio_drain_rx,
                 sdp_tx,
                 offer_rx,
+                start_time,
             ).await;
         });
     });
@@ -729,6 +883,7 @@ fn connect(py: Python, sdp_offer: String, max_width: Option<u32>, max_height: Op
     // ---- Build the NativeStream ----
     let native_stream = NativeStream {
         frame_rx,
+        audio_rx,
         decoder_obj: decoder_obj_for_stream,
         shutdown,
         worker_handle: std::sync::Mutex::new(Some(worker_handle)),

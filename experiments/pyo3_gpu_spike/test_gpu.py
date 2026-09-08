@@ -11,6 +11,7 @@ if os.path.exists(dll_path):
     shutil.copyfile(dll_path, pyd_path)
     
 try:
+    # pyrefly: ignore [missing-import]
     import velo_gpu
 except ImportError as e:
     print(f"FAIL: Could not import velo_gpu: {e}")

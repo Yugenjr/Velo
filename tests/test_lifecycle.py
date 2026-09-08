@@ -1,6 +1,7 @@
 import sys
 import time
 import threading
+import pytest
 import velo
 import torch
 
@@ -29,6 +30,13 @@ def get_current_thread_count():
         return process.num_threads()
     except ImportError:
         return threading.active_count()
+
+@pytest.fixture
+def baseline_threads():
+    stream, _ = velo.connect(dummy_sdp)
+    stream.close()
+    time.sleep(1.0)
+    return get_current_thread_count()
 
 def test_idempotent_close(baseline_threads):
     print("\n--- Testing Idempotent Close ---")

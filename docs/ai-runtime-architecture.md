@@ -5,24 +5,38 @@ Velo currently provides a powerful but low-level set of decoupled primitives. Da
 
 The architecture resembles a toolkit rather than an integrated runtime:
 ```text
-WebRTC Signaling -> Native Decoder -> Frame (CUDA) 
-                                        | (Manual Thread)
-                                        v
-                                  AIScheduler
-                                        | (Manual Thread)
-                                        v
-                               SceneChangeDetector
-                                        |
-                                  GPUPreprocessor
-                                        |
-                                  VLM Adapter
+[WebRTC Signaling / LiveKit]
+       |
+       +---------------- Video ----------------+---------------- Audio (V1.8) ---------------+
+       |                                       |                                             |
+       v                                       v                                             v
+Native NVDEC -> Frame (CUDA)            Native Opus -> AudioChunk (CPU)                 AudioChunk
+       |                                       |                                             |
+       v                                       v                                             v
+  AIScheduler                            AudioScheduler                               AudioScheduler
+       |                                       |                                             |
+       v                                       v                                             v
+ SceneChangeDetector                          VAD                                           VAD
+       |                                       |                                             |
+ GPUPreprocessor                          ASRAdapter                                    ASRAdapter
+       |                                       |                                             |
+  VLM Adapter                             Transcript                                    Transcript
+       |                                       |                                             |
+       +---------------------------------------+---------------------------------------------+
+                                               |
+                                               v
+                                        TemporalFusion
 ```
 
-## 2. Current Component Responsibilities
-- **`velo.connect_livekit` / `Stream`**: Owns WebRTC signaling, RTP packet ingestion, and NVDEC decoding. Yields `Frame` objects synchronously via `stream.next()`.
+- **`Stream`**: Owns WebRTC signaling, RTP packet ingestion, NVDEC decoding, and native Opus audio decoding. Yields GPU `Frame` and `AudioChunk` objects.
 - **`Frame`**: An RAII wrapper around a DLPack capsule. Owns GPU memory lifecycle.
+- **`AudioChunk`**: Immutable tensor representation of an audio buffer, produced directly by native Opus decoding.
 - **`AIScheduler`**: Maintains a temporal ring buffer. Handles FPS pacing and backpressure via explicit `submit()`, `acquire()`, and `release()`.
+- **`AudioScheduler`**: Maintains a bounded buffer of `AudioChunk`s, applying backpressure and yielding consistent temporal slices (e.g., 500ms).
+- **`VAD`**: Voice Activity Detector, an RMS energy heuristic.
+- **`ASRAdapter`**: Interface for transcribing speech to text.
 - **`SceneChangeDetector`**: A cheap GPU heuristic invoked internally by the scheduler to skip visually redundant frames.
+- **`CandidateSelector`**: Evaluates whether a visually changed frame is worth spending VLM compute on, rejecting low-info frames based on spatial variance and cooldowns.
 - **`GPUPreprocessor`**: Transforms `Frame`s into VLM-ready NCHW normalized tensors.
 - **`VLMAdapter`**: Wraps Hugging Face model execution.
 
