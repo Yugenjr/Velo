@@ -1,0 +1,219 @@
+{
+  "benchmark": "real_multistream",
+  "environment": {
+    "timestamp": "2026-09-11T17:32:42Z",
+    "os": "Windows",
+    "os_release": "11",
+    "os_version": "10.0.26200",
+    "architecture": "AMD64",
+    "processor": "Intel64 Family 6 Model 186 Stepping 2, GenuineIntel",
+    "python_version": "3.13.9",
+    "torch_version": "2.6.0+cu124",
+    "gpu": {
+      "available": true,
+      "name": "NVIDIA GeForce RTX 3050 A Laptop GPU",
+      "count": 1,
+      "cuda_version": "12.4",
+      "memory_total_mb": 4093.5
+    }
+  },
+  "configuration": {
+    "description": "Hardware NVDEC multistream benchmark"
+  },
+  "metrics": {
+    "runs": [
+      {
+        "num_streams": 1,
+        "resolution": "720p",
+        "width": 1280,
+        "height": 720,
+        "duration_s": 3.0019037000020035,
+        "total_frames": 483,
+        "aggregate_fps": 160.9,
+        "per_stream_fps": [
+          160.9
+        ],
+        "gpu_max_vram_mb": 0.0,
+        "cpu_usage_pct": 22.6
+      },
+      {
+        "num_streams": 2,
+        "resolution": "720p",
+        "width": 1280,
+        "height": 720,
+        "duration_s": 3.0021323000109987,
+        "total_frames": 948,
+        "aggregate_fps": 315.78,
+        "per_stream_fps": [
+          157.89,
+          157.89
+        ],
+        "gpu_max_vram_mb": 0.0,
+        "cpu_usage_pct": 38.5
+      },
+      {
+        "num_streams": 4,
+        "resolution": "720p",
+        "width": 1280,
+        "height": 720,
+        "duration_s": 3.0046958000020823,
+        "total_frames": 1883,
+        "aggregate_fps": 626.69,
+        "per_stream_fps": [
+          156.75,
+          156.75,
+          156.42,
+          156.75
+        ],
+        "gpu_max_vram_mb": 0.0,
+        "cpu_usage_pct": 85.1
+      },
+      {
+        "num_streams": 8,
+        "resolution": "720p",
+        "width": 1280,
+        "height": 720,
+        "duration_s": 3.009004699997604,
+        "total_frames": 3767,
+        "aggregate_fps": 1251.91,
+        "per_stream_fps": [
+          158.19,
+          155.87,
+          157.19,
+          154.87,
+          155.87,
+          155.87,
+          156.2,
+          157.86
+        ],
+        "gpu_max_vram_mb": 0.0,
+        "cpu_usage_pct": 134.0
+      },
+      {
+        "num_streams": 16,
+        "resolution": "720p",
+        "width": 1280,
+        "height": 720,
+        "duration_s": 3.3114932000025874,
+        "total_frames": 5570,
+        "aggregate_fps": 1682.02,
+        "per_stream_fps": [
+          100.56,
+          118.07,
+          101.46,
+          106.3,
+          112.94,
+          114.15,
+          102.07,
+          99.05,
+          106.6,
+          96.63,
+          108.11,
+          101.77,
+          105.99,
+          111.73,
+          100.86,
+          95.73
+        ],
+        "gpu_max_vram_mb": 0.0,
+        "cpu_usage_pct": 120.5
+      },
+      {
+        "num_streams": 1,
+        "resolution": "1080p",
+        "width": 1920,
+        "height": 1080,
+        "duration_s": 3.001451999996789,
+        "total_frames": 440,
+        "aggregate_fps": 146.6,
+        "per_stream_fps": [
+          146.6
+        ],
+        "gpu_max_vram_mb": 0.0,
+        "cpu_usage_pct": 26.0
+      },
+      {
+        "num_streams": 2,
+        "resolution": "1080p",
+        "width": 1920,
+        "height": 1080,
+        "duration_s": 3.0029838000045856,
+        "total_frames": 878,
+        "aggregate_fps": 292.38,
+        "per_stream_fps": [
+          146.19,
+          146.19
+        ],
+        "gpu_max_vram_mb": 0.0,
+        "cpu_usage_pct": 41.6
+      },
+      {
+        "num_streams": 4,
+        "resolution": "1080p",
+        "width": 1920,
+        "height": 1080,
+        "duration_s": 3.003060600007302,
+        "total_frames": 1765,
+        "aggregate_fps": 587.73,
+        "per_stream_fps": [
+          146.85,
+          146.85,
+          146.85,
+          147.18
+        ],
+        "gpu_max_vram_mb": 0.0,
+        "cpu_usage_pct": 68.6
+      },
+      {
+        "num_streams": 8,
+        "resolution": "1080p",
+        "width": 1920,
+        "height": 1080,
+        "duration_s": 3.0544469999877037,
+        "total_frames": 2796,
+        "aggregate_fps": 915.39,
+        "per_stream_fps": [
+          114.26,
+          116.55,
+          108.04,
+          114.59,
+          116.22,
+          121.13,
+          111.97,
+          112.62
+        ],
+        "gpu_max_vram_mb": 0.0,
+        "cpu_usage_pct": 85.2
+      },
+      {
+        "num_streams": 16,
+        "resolution": "1080p",
+        "width": 1920,
+        "height": 1080,
+        "duration_s": 3.2093166999984533,
+        "total_frames": 2905,
+        "aggregate_fps": 905.18,
+        "per_stream_fps": [
+          55.15,
+          61.7,
+          53.59,
+          56.09,
+          56.71,
+          60.14,
+          58.27,
+          56.09,
+          57.64,
+          57.02,
+          54.84,
+          54.22,
+          56.71,
+          52.66,
+          57.33,
+          57.02
+        ],
+        "gpu_max_vram_mb": 0.0,
+        "cpu_usage_pct": 92.3
+      }
+    ]
+  }
+}

@@ -19,6 +19,8 @@ from .audio_scheduler import AudioScheduler
 from .vad import VAD, VoiceActivityResult
 from .asr import BaseASRAdapter, MockASRAdapter, Transcript
 from .fusion import TemporalFusion, MultimodalContext, Observation, VideoObservation, AudioObservation
+from .metrics import RuntimeMetrics, RollingStats, StreamMetrics
+from .multistream import MultiStreamPipeline, StreamSession, MultiStreamResult
 
 # Strict environment dependency audit at import time
 try:
@@ -73,6 +75,8 @@ __all__ = [
     "GPUPreprocessor",
     "SceneChangeDetector",
     "ChangeResult",
+    "CandidateSelector",
+    "CandidateScore",
     "AIPipeline",
     "PipelineState",
     "AudioChunk",
@@ -87,4 +91,14 @@ __all__ = [
     "Observation",
     "VideoObservation",
     "AudioObservation",
+    "RuntimeMetrics",
+    "RollingStats",
+    "StreamMetrics",
+    "MultiStreamPipeline",
+    "StreamSession",
+    "MultiStreamResult",
+    "__version__",
 ]
+
+__version__ = "2.0.0"
+

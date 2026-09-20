@@ -1,0 +1,121 @@
+{
+  "benchmark": "real_h264_nvdec",
+  "environment": {
+    "timestamp": "2026-09-08T19:14:42Z",
+    "os": "Windows",
+    "os_release": "11",
+    "os_version": "10.0.26200",
+    "architecture": "AMD64",
+    "processor": "Intel64 Family 6 Model 186 Stepping 2, GenuineIntel",
+    "python_version": "3.13.9",
+    "torch_version": "2.6.0+cu124",
+    "gpu": {
+      "available": true,
+      "name": "NVIDIA GeForce RTX 3050 A Laptop GPU",
+      "count": 1,
+      "cuda_version": "12.4",
+      "memory_total_mb": 4093.5
+    }
+  },
+  "configuration": {
+    "resolutions": [
+      "480p",
+      "720p",
+      "1080p",
+      "4k"
+    ],
+    "codec": "h264",
+    "decoder": "NVIDIA NVDEC (Hardware)",
+    "zero_copy_format": "DLPack -> PyTorch CUDA"
+  },
+  "metrics": {
+    "480p": {
+      "resolution_name": "480p",
+      "width": 640,
+      "height": 480,
+      "decoded_frames": 60,
+      "duration_s": 0.0167,
+      "max_nvdec_throughput_fps": 3586.61,
+      "frame_interval_ms": {
+        "mean": 0.283,
+        "p50": 0.261,
+        "p95": 0.428,
+        "p99": 0.626,
+        "std": 0.083
+      },
+      "dlpack_conversion_us": {
+        "mean": 68.78,
+        "p50": 9.9,
+        "p95": 17.53
+      },
+      "gpu_memory_allocated_mb": 0.0,
+      "is_cuda": true
+    },
+    "720p": {
+      "resolution_name": "720p",
+      "width": 1280,
+      "height": 720,
+      "decoded_frames": 60,
+      "duration_s": 0.0349,
+      "max_nvdec_throughput_fps": 1716.84,
+      "frame_interval_ms": {
+        "mean": 0.585,
+        "p50": 0.582,
+        "p95": 0.695,
+        "p99": 0.79,
+        "std": 0.08
+      },
+      "dlpack_conversion_us": {
+        "mean": 13.08,
+        "p50": 10.1,
+        "p95": 29.94
+      },
+      "gpu_memory_allocated_mb": 0.0,
+      "is_cuda": true
+    },
+    "1080p": {
+      "resolution_name": "1080p",
+      "width": 1920,
+      "height": 1080,
+      "decoded_frames": 60,
+      "duration_s": 0.0686,
+      "max_nvdec_throughput_fps": 874.81,
+      "frame_interval_ms": {
+        "mean": 1.157,
+        "p50": 1.15,
+        "p95": 1.364,
+        "p99": 1.516,
+        "std": 0.134
+      },
+      "dlpack_conversion_us": {
+        "mean": 11.75,
+        "p50": 10.1,
+        "p95": 13.01
+      },
+      "gpu_memory_allocated_mb": 0.0,
+      "is_cuda": true
+    },
+    "4k": {
+      "resolution_name": "4K_UHD",
+      "width": 3840,
+      "height": 2160,
+      "decoded_frames": 30,
+      "duration_s": 0.1271,
+      "max_nvdec_throughput_fps": 236.11,
+      "frame_interval_ms": {
+        "mean": 4.346,
+        "p50": 4.357,
+        "p95": 4.663,
+        "p99": 4.71,
+        "std": 0.189
+      },
+      "dlpack_conversion_us": {
+        "mean": 18.96,
+        "p50": 11.2,
+        "p95": 27.32
+      },
+      "gpu_memory_allocated_mb": 0.0,
+      "is_cuda": true
+    }
+  }
+}

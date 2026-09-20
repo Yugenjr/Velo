@@ -1,0 +1,46 @@
+{
+  "benchmark": "real_audio_processing",
+  "environment": {
+    "timestamp": "2026-09-08T19:21:31Z",
+    "os": "Windows",
+    "os_release": "11",
+    "os_version": "10.0.26200",
+    "architecture": "AMD64",
+    "processor": "Intel64 Family 6 Model 186 Stepping 2, GenuineIntel",
+    "python_version": "3.13.9",
+    "torch_version": "2.6.0+cu124",
+    "gpu": {
+      "available": true,
+      "name": "NVIDIA GeForce RTX 3050 A Laptop GPU",
+      "count": 1,
+      "cuda_version": "12.4",
+      "memory_total_mb": 4093.5
+    }
+  },
+  "configuration": {
+    "sample_rate": 48000,
+    "channels": 2,
+    "chunk_duration_s": 0.5,
+    "vad_energy_threshold": 0.01
+  },
+  "metrics": {
+    "duration_s": 15.0,
+    "total_raw_chunks": 750,
+    "consolidated_chunks": 20,
+    "speech_chunks": 10,
+    "silence_chunks": 10,
+    "ingest_throughput_chunks_per_sec": 85123.2,
+    "vad_latency_us": {
+      "mean": 289.88,
+      "p50": 284.3,
+      "p95": 446.78,
+      "p99": 528.64
+    },
+    "asr_dispatch_latency_ms": {
+      "mean": 10.37,
+      "p50": 10.335,
+      "p95": 10.58
+    },
+    "scheduler_drops": 250
+  }
+}

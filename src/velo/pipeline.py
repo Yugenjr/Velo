@@ -2,7 +2,7 @@ import enum
 import threading
 import asyncio
 import time
-from typing import Optional, Union, List, Any
+from typing import Optional, Union, List, Any, Dict
 from .scheduler import AIScheduler, SchedulerClosedError
 from .vlm import BaseVLMAdapter, BaseMultimodalAdapter, VLMResponse
 from .exceptions import StreamClosedError, VeloError
@@ -94,7 +94,7 @@ class AIPipeline:
     async def stop(self):
         """Gracefully stop the pipeline and all background threads."""
         with self._state_lock:
-            if self.state in (PipelineState.STOPPING, PipelineState.STOPPED, PipelineState.FAILED):
+            if self.state in (PipelineState.STOPPING, PipelineState.STOPPED):
                 return
             self.state = PipelineState.STOPPING
             
@@ -167,6 +167,11 @@ class AIPipeline:
         while not self._stop_event.is_set():
             try:
                 frame = self.stream.next()
+                if frame is not None:
+                    try:
+                        frame.arrival_time = time.time()
+                    except Exception:
+                        pass
                 if self.fusion is not None:
                     ts = getattr(frame, "timestamp", 0.0)
                     self.fusion.add_video(frame, ts)
@@ -295,10 +300,9 @@ class AIPipeline:
                 prep_lat_ms = getattr(response, "preprocessing_latency_ms", 0.0)
                 infer_lat_ms = getattr(response, "latency_ms", total_latency_ms)
                 
-                # End-to-end latency: from frame arrival to response delivery
-                e2e_lat_ms = total_latency_ms
-                if ts is not None and ts > 0:
-                    e2e_lat_ms = max(total_latency_ms, (time.time() - ts) * 1000.0)
+                # End-to-end latency: from frame arrival in Velo to response delivery
+                arrival_t = getattr(frame, "arrival_time", None) or t_infer_start
+                e2e_lat_ms = max(total_latency_ms, (t_infer_end - arrival_t) * 1000.0)
 
                 self._metrics.record_inference(
                     inference_latency_ms=infer_lat_ms,

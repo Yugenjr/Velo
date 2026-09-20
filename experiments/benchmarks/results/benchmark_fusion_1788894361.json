@@ -1,0 +1,38 @@
+{
+  "benchmark": "fusion",
+  "environment": {
+    "timestamp": "2026-09-08T19:06:01Z",
+    "os": "Windows",
+    "os_release": "11",
+    "os_version": "10.0.26200",
+    "architecture": "AMD64",
+    "processor": "Intel64 Family 6 Model 186 Stepping 2, GenuineIntel",
+    "python_version": "3.13.9",
+    "torch_version": "2.6.0+cu124",
+    "gpu": {
+      "available": true,
+      "name": "NVIDIA GeForce RTX 3050 A Laptop GPU",
+      "count": 1,
+      "cuda_version": "12.4",
+      "memory_total_mb": 4093.5
+    }
+  },
+  "configuration": {
+    "max_history_s": 30.0,
+    "num_observations": 5000,
+    "num_queries": 1000
+  },
+  "metrics": {
+    "num_video_observations": 5000,
+    "num_audio_observations": 500,
+    "num_queries": 1000,
+    "video_ingest_rate_ops": 13633.97,
+    "audio_ingest_rate_ops": 30665.05,
+    "query_throughput_qps": 33409.3,
+    "avg_lookup_latency_ms": 0.029,
+    "avg_skew_ms": 14.85,
+    "max_skew_ms": 297.0,
+    "avg_matched_video": 8.67,
+    "avg_matched_audio": 0.99
+  }
+}

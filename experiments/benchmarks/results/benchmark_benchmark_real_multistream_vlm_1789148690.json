@@ -1,0 +1,263 @@
+{
+  "benchmark": "benchmark_real_multistream_vlm",
+  "environment": {
+    "timestamp": "2026-09-11T17:44:50Z",
+    "os": "Windows",
+    "os_release": "11",
+    "os_version": "10.0.26200",
+    "architecture": "AMD64",
+    "processor": "Intel64 Family 6 Model 186 Stepping 2, GenuineIntel",
+    "python_version": "3.13.9",
+    "torch_version": "2.6.0+cu124",
+    "gpu": {
+      "available": true,
+      "name": "NVIDIA GeForce RTX 3050 A Laptop GPU",
+      "count": 1,
+      "cuda_version": "12.4",
+      "memory_total_mb": 4093.5
+    }
+  },
+  "configuration": {
+    "benchmark": "real_multistream_vlm",
+    "environment": {
+      "timestamp": "2026-09-11T17:44:50Z",
+      "os": "Windows",
+      "os_release": "11",
+      "os_version": "10.0.26200",
+      "architecture": "AMD64",
+      "processor": "Intel64 Family 6 Model 186 Stepping 2, GenuineIntel",
+      "python_version": "3.13.9",
+      "torch_version": "2.6.0+cu124",
+      "gpu": {
+        "available": true,
+        "name": "NVIDIA GeForce RTX 3050 A Laptop GPU",
+        "count": 1,
+        "cuda_version": "12.4",
+        "memory_total_mb": 4093.5
+      }
+    },
+    "results": {
+      "real_vlm_loading": {
+        "status": "BLOCKED",
+        "error": "Traceback (most recent call last):\n  File \"C:\\Users\\Yugendra\\Velo\\Velo\\experiments\\benchmarks\\real_multistream_vlm_benchmark.py\", line 140, in run_vlm_benchmark\n    real_adapter = SmolVLMAdapter(use_gpu_preprocess=False)\n  File \"C:\\Users\\Yugendra\\Velo\\Velo\\src\\velo\\vlm.py\", line 209, in __init__\n    from transformers import AutoProcessor, AutoModelForVision2Seq\nImportError: cannot import name 'AutoModelForVision2Seq' from 'transformers' (C:\\Users\\Yugendra\\anaconda3\\Lib\\site-packages\\transformers\\__init__.py)\n"
+      },
+      "concurrency_tests": [
+        {
+          "num_streams": 1,
+          "duration": 3.0180585384368896,
+          "total_inferences": 0,
+          "per_stream_inferences": {
+            "stream-0": 0
+          },
+          "aggregate_rate": 0.0,
+          "variance": 0.0,
+          "metrics": {
+            "system": {
+              "active_streams": 1,
+              "uptime_s": 3.11,
+              "total_worker_errors": 0
+            },
+            "streams": [
+              "stream-0"
+            ],
+            "video": {
+              "total_fps": 0.0,
+              "total_frames_received": 0,
+              "total_frames_processed": 0,
+              "total_frames_dropped": 0
+            },
+            "audio": {
+              "total_chunks_received": 0,
+              "total_chunks_processed": 0,
+              "total_chunks_dropped": 0
+            },
+            "inference": {
+              "total_inferences": 0,
+              "total_errors": 0
+            },
+            "fusion": {
+              "total_queries": 0
+            },
+            "gpu": {
+              "available": true,
+              "device": "NVIDIA GeForce RTX 3050 A Laptop GPU",
+              "device_index": 0,
+              "total_memory_mb": 4093.5,
+              "memory_allocated_mb": 0.0,
+              "memory_reserved_mb": 0.0,
+              "max_memory_allocated_mb": 0.0,
+              "free_memory_mb": 4093.5
+            }
+          }
+        },
+        {
+          "num_streams": 2,
+          "duration": 0.05530238151550293,
+          "total_inferences": 0,
+          "per_stream_inferences": {
+            "stream-0": 0,
+            "stream-1": 0
+          },
+          "aggregate_rate": 0.0,
+          "variance": 0.0,
+          "metrics": {
+            "system": {
+              "active_streams": 2,
+              "uptime_s": 0.06,
+              "total_worker_errors": 0
+            },
+            "streams": [
+              "stream-0",
+              "stream-1"
+            ],
+            "video": {
+              "total_fps": 0.0,
+              "total_frames_received": 0,
+              "total_frames_processed": 0,
+              "total_frames_dropped": 0
+            },
+            "audio": {
+              "total_chunks_received": 0,
+              "total_chunks_processed": 0,
+              "total_chunks_dropped": 0
+            },
+            "inference": {
+              "total_inferences": 0,
+              "total_errors": 0
+            },
+            "fusion": {
+              "total_queries": 0
+            },
+            "gpu": {
+              "available": true,
+              "device": "NVIDIA GeForce RTX 3050 A Laptop GPU",
+              "device_index": 0,
+              "total_memory_mb": 4093.5,
+              "memory_allocated_mb": 0.0,
+              "memory_reserved_mb": 0.0,
+              "max_memory_allocated_mb": 0.0,
+              "free_memory_mb": 4093.5
+            }
+          }
+        },
+        {
+          "num_streams": 4,
+          "duration": 2.946547031402588,
+          "total_inferences": 0,
+          "per_stream_inferences": {
+            "stream-0": 0,
+            "stream-1": 0,
+            "stream-2": 0,
+            "stream-3": 0
+          },
+          "aggregate_rate": 0.0,
+          "variance": 0.0,
+          "metrics": {
+            "system": {
+              "active_streams": 4,
+              "uptime_s": 2.95,
+              "total_worker_errors": 0
+            },
+            "streams": [
+              "stream-0",
+              "stream-1",
+              "stream-2",
+              "stream-3"
+            ],
+            "video": {
+              "total_fps": 0.0,
+              "total_frames_received": 0,
+              "total_frames_processed": 0,
+              "total_frames_dropped": 0
+            },
+            "audio": {
+              "total_chunks_received": 0,
+              "total_chunks_processed": 0,
+              "total_chunks_dropped": 0
+            },
+            "inference": {
+              "total_inferences": 0,
+              "total_errors": 0
+            },
+            "fusion": {
+              "total_queries": 0
+            },
+            "gpu": {
+              "available": true,
+              "device": "NVIDIA GeForce RTX 3050 A Laptop GPU",
+              "device_index": 0,
+              "total_memory_mb": 4093.5,
+              "memory_allocated_mb": 0.0,
+              "memory_reserved_mb": 0.0,
+              "max_memory_allocated_mb": 0.0,
+              "free_memory_mb": 4093.5
+            }
+          }
+        },
+        {
+          "num_streams": 8,
+          "duration": 0.06004953384399414,
+          "total_inferences": 0,
+          "per_stream_inferences": {
+            "stream-0": 0,
+            "stream-1": 0,
+            "stream-2": 0,
+            "stream-3": 0,
+            "stream-4": 0,
+            "stream-5": 0,
+            "stream-6": 0,
+            "stream-7": 0
+          },
+          "aggregate_rate": 0.0,
+          "variance": 0.0,
+          "metrics": {
+            "system": {
+              "active_streams": 8,
+              "uptime_s": 0.07,
+              "total_worker_errors": 0
+            },
+            "streams": [
+              "stream-0",
+              "stream-1",
+              "stream-2",
+              "stream-3",
+              "stream-4",
+              "stream-5",
+              "stream-6",
+              "stream-7"
+            ],
+            "video": {
+              "total_fps": 0.0,
+              "total_frames_received": 0,
+              "total_frames_processed": 0,
+              "total_frames_dropped": 0
+            },
+            "audio": {
+              "total_chunks_received": 0,
+              "total_chunks_processed": 0,
+              "total_chunks_dropped": 0
+            },
+            "inference": {
+              "total_inferences": 0,
+              "total_errors": 0
+            },
+            "fusion": {
+              "total_queries": 0
+            },
+            "gpu": {
+              "available": true,
+              "device": "NVIDIA GeForce RTX 3050 A Laptop GPU",
+              "device_index": 0,
+              "total_memory_mb": 4093.5,
+              "memory_allocated_mb": 0.0,
+              "memory_reserved_mb": 0.0,
+              "max_memory_allocated_mb": 0.0,
+              "free_memory_mb": 4093.5
+            }
+          }
+        }
+      ]
+    }
+  },
+  "metrics": {}
+}

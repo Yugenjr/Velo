@@ -135,6 +135,8 @@ class AIScheduler:
             self._has_new_frame = True
             self._cond.notify_all()
 
+    push = submit
+
     def acquire(self):
         """
         Block until a fresh frame is available, target FPS pacing is met,

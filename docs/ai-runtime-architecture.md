@@ -113,8 +113,50 @@ The user interacts entirely in the `asyncio` domain. The heavy blocking operatio
 - **Model specific logic**: Do not bake Hugging Face or OpenAI specific tokenization into the Pipeline. The Pipeline should only expect a `VLMAdapter` interface (`.generate(frames, prompt)`).
 - **WebRTC details**: Do not put SDP negotiation or WebSocket connection logic inside the Pipeline.
 
-## 12. Affected Files (For Future Implementation)
-- **New File**: `src/velo/pipeline.py` (Implementation of `AIPipeline`).
-- **Modifications**: `src/velo/__init__.py` (Export `AIPipeline`).
-- **Tests**: `tests/test_pipeline.py` (New tests verifying async generation and thread teardown).
-- **Docs**: `docs/getting-started.md` (Update tutorial to use `AIPipeline`).
+## 13. Runtime Observability & Metrics (V1.10)
+
+Velo V1.10 introduces a zero-overhead, thread-safe runtime metrics and observability layer:
+
+```text
+AIPipeline / Runtime
+   ├── Video: frames_received, frames_scheduled, frames_dropped, current_fps, average_fps, queue_depth
+   ├── Audio: chunks_received, chunks_dropped, current_audio_rate, queue_depth
+   ├── Inference: latency (mean/p50/p95/p99/min/max), preprocessing latency, end-to-end latency, errors
+   ├── Fusion: queries, avg lookup latency, matched video/audio counts, timestamp skew (mean/max)
+   ├── System: pipeline_state, worker_errors, uptime_seconds
+   └── GPU: allocated_mb, reserved_mb, max_allocated_mb, device_name (safe query)
+```
+
+### Public Metrics API
+```python
+# Snapshot live runtime telemetry while pipeline is running
+metrics = pipeline.metrics()  # or pipeline.get_metrics()
+
+print(f"End-to-End Latency p95: {metrics['inference']['end_to_end_latency_ms']['p95']} ms")
+print(f"Timestamp Skew Avg: {metrics['fusion']['timestamp_skew_ms']['mean']} ms")
+print(f"Video Drops: {metrics['video']['frames_dropped']}")
+```
+
+### Reproducible Benchmarks
+Benchmark suites are located in `experiments/benchmarks/`:
+- `video_ingestion_benchmark.py`
+- `audio_ingestion_benchmark.py`
+- `scheduler_benchmark.py`
+- `fusion_benchmark.py`
+- `multimodal_pipeline_benchmark.py`
+
+## 14. Real Hardware & Real Media Benchmarks (V1.11)
+
+Milestone V1.11 establishes a verified baseline using real media and genuine GPU hardware decoding:
+
+- **H.264 Hardware NVDEC**:
+  - 480p: **3,486.5 ± 217.7 FPS**
+  - 720p: **1,695.1 ± 10.5 FPS**
+  - 1080p: **627.9 ± 186.8 FPS**
+  - 4K UHD: **121.1 ± 27.4 FPS**
+- **Zero-Copy DLPack Tensor Wrapping**: **9.9 to 10.5 $\mu\text{s}$**
+- **VAD Processing Latency**: $p_{50} = \mathbf{269.6\, \mu\text{s}}$
+- **Temporal Context Retrieval**: $p_{50} = \mathbf{3.67\, \mu\text{s}}$
+- **Master Benchmark Harness**: `experiments/benchmarks/run_v1_11_suite.py` (3-run repeatability with mean and stddev)
+
+

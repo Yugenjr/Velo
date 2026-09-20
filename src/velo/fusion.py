@@ -139,6 +139,8 @@ class TemporalFusion:
             audio=matched_audio
         )
 
+    get_context_window = context
+
     def latest_context(self, window: float = 1.5) -> Optional[MultimodalContext]:
         """
         Retrieve a MultimodalContext around the most recent observation's timestamp.

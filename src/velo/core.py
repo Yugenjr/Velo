@@ -12,11 +12,12 @@ class Frame:
     so the CUDA context outlives the tensor.
     """
 
-    __slots__ = ("_capsule", "_decoder_ref")
+    __slots__ = ("_capsule", "_decoder_ref", "_arrival_time")
 
     def __init__(self, dlpack_capsule, decoder_ref):
         self._capsule = dlpack_capsule
         self._decoder_ref = decoder_ref
+        self._arrival_time = None
 
     def to_torch(self) -> torch.Tensor:
         """
@@ -48,6 +49,15 @@ class Frame:
         except Exception:
             return 0.0
 
+    @property
+    def arrival_time(self) -> float:
+        """Returns the local wall-clock arrival timestamp of this frame."""
+        return self._arrival_time
+
+    @arrival_time.setter
+    def arrival_time(self, val: float):
+        self._arrival_time = val
+
 
 class Stream:
     """
@@ -62,9 +72,15 @@ class Stream:
         stream.close()
     """
 
-    def __init__(self, native_stream, signaling_task=None):
+    def __init__(self, native_stream, signaling_task=None, stream_id: str = None):
         self._native = native_stream
         self._signaling_task = signaling_task
+        self._stream_id = stream_id or f"stream_{id(self)}"
+
+    @property
+    def stream_id(self) -> str:
+        """Returns the unique stream identifier."""
+        return self._stream_id
 
     def next(self) -> Frame:
         """
@@ -157,7 +173,7 @@ class Stream:
         self.close()
 
 
-def connect(sdp_offer: str, max_width: int = None, max_height: int = None):
+def connect(sdp_offer: str, max_width: int = None, max_height: int = None, stream_id: str = None):
     """
     Connect to a WebRTC peer and begin receiving GPU-decoded video.
 
@@ -165,12 +181,13 @@ def connect(sdp_offer: str, max_width: int = None, max_height: int = None):
         sdp_offer: The SDP offer string from the browser.
         max_width: Maximum expected stream width (default 1920).
         max_height: Maximum expected stream height (default 1080).
+        stream_id: Optional unique identifier for this stream.
 
     Returns:
         A tuple of (Stream, sdp_answer_string).
     """
     native_stream, sdp_answer = _velo_native.connect(sdp_offer, max_width, max_height)
-    return Stream(native_stream), sdp_answer
+    return Stream(native_stream, stream_id=stream_id), sdp_answer
 
 
 class RtpReceiver:
@@ -178,8 +195,14 @@ class RtpReceiver:
     Ingests raw H.264 RTP packet payloads and decodes them directly to GPU memory.
     """
 
-    def __init__(self, codec: str = "h264", max_width: int = None, max_height: int = None):
+    def __init__(self, codec: str = "h264", max_width: int = None, max_height: int = None, stream_id: str = None):
         self._native = _velo_native.RtpReceiver(codec, max_width, max_height)
+        self._stream_id = stream_id or f"stream_{id(self)}"
+
+    @property
+    def stream_id(self) -> str:
+        """Returns the unique stream identifier."""
+        return self._stream_id
 
     def push_rtp(self, payload: bytes, timestamp: int):
         """
@@ -228,7 +251,7 @@ class RtpReceiver:
         self.close()
 
 
-def connect_livekit(url_or_track, token: str = None, codec: str = "h264"):
+def connect_livekit(url_or_track, token: str = None, codec: str = "h264", stream_id: str = None):
     """
     Connect to an incoming LiveKit video track.
     
@@ -239,7 +262,7 @@ def connect_livekit(url_or_track, token: str = None, codec: str = "h264"):
     if not isinstance(url_or_track, str):
         import threading
         import asyncio
-        receiver = RtpReceiver(codec=codec)
+        receiver = RtpReceiver(codec=codec, stream_id=stream_id)
 
         def thread_worker():
             loop = asyncio.new_event_loop()
