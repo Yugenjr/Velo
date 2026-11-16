@@ -69,7 +69,6 @@ CTestTestfile.cmake
 _deps/
 
 # IDE / Editor
-.vscode/
 .idea/
 *.swp
 *.swo
@@ -93,3 +92,5 @@ temp/
 *.h264
 *.webp
 
+config.bat
+node_modules
